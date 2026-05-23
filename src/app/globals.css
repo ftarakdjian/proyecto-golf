@@ -1,27 +1,117 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --green-primary: #1a6b3c;
+  --green-light: #2d9e5f;
+  --green-dark: #0f4a28;
+  --bg-dark: #0f1a14;
+  --bg-surface: #1a2e20;
+  --bg-surface2: #223829;
+  --text-main: #e8f0e9;
+  --text-muted: #8aad8f;
+  --gold: #c9a84c;
+  --gold-light: #e5c97e;
+  --border: #2a4530;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  font-family: 'DM Sans', sans-serif;
+  min-height: 100vh;
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+h1, h2, h3 {
+  font-family: 'Playfair Display', serif;
+}
+
+/* Score indicators */
+.score-eagle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 2px solid #3b82f6;
+  box-shadow: 0 0 0 3px #1e3a5f;
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.score-birdie {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 2px solid #3b82f6;
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.score-par {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  font-weight: 500;
+}
+
+.score-bogey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 2px solid #ef4444;
+  color: #fca5a5;
+  font-weight: 600;
+}
+
+.score-double {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid #ef4444;
+  box-shadow: 0 0 0 2px #ef4444;
+  color: #fca5a5;
+  font-weight: 600;
+}
+
+.score-triple {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  background-color: #ef4444;
+  color: white;
+  font-weight: 700;
+  border-radius: 2px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-dark);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--green-primary);
+  border-radius: 3px;
 }
