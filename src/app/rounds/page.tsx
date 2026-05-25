@@ -2,27 +2,45 @@
 
 import AppShell from '@/components/AppShell';
 import { useEffect, useState } from 'react';
-import { Round, Player, Course } from '@/lib/types';
-import { getRounds, getPlayers, getCourses, getRoundPlayersForRound } from '@/lib/storage';
+import { Round, Player, Course, RoundPlayer } from '@/lib/types';
+import { getRounds, getPlayers, getCourses, getAllRoundPlayers } from '@/lib/storage';
 import { formatDate } from '@/lib/utils';
 import Link from 'next/link';
+import LoadingSpinner from '@/components/LoadingSpinner';
 
 export default function RoundsPage() {
   const [rounds, setRounds] = useState<Round[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
+  const [allRoundPlayers, setAllRoundPlayers] = useState<RoundPlayer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setRounds(getRounds().sort((a, b) => b.date.localeCompare(a.date)));
-    setPlayers(getPlayers());
-    setCourses(getCourses());
-  }, []);
+  async function loadData() {
+    try {
+      setLoading(true);
+      setError(null);
+      const [r, p, c, rps] = await Promise.all([
+        getRounds(), getPlayers(), getCourses(), getAllRoundPlayers(),
+      ]);
+      setRounds(r.sort((a, b) => b.date.localeCompare(a.date)));
+      setPlayers(p);
+      setCourses(c);
+      setAllRoundPlayers(rps);
+    } catch {
+      setError('Error al cargar rondas');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getCourse = (id: string) => courses.find(c => c.id === id);
   const getPlayerName = (id: string) => players.find(p => p.id === id)?.name || '?';
 
   const getRoundPlayerNames = (roundId: string) => {
-    const rps = getRoundPlayersForRound(roundId);
+    const rps = allRoundPlayers.filter(rp => rp.roundId === roundId);
     return rps.map(rp => getPlayerName(rp.playerId)).join(', ');
   };
 
@@ -43,7 +61,18 @@ export default function RoundsPage() {
           </Link>
         </div>
 
-        {rounds.length === 0 ? (
+        {loading ? (
+          <div className="flex justify-center py-20">
+            <LoadingSpinner size="lg" message="Cargando rondas..." />
+          </div>
+        ) : error ? (
+          <div className="rounded-xl p-6 text-center" style={{ background: '#2a1a1a', border: '1px solid #5a2020' }}>
+            <p className="text-red-400 text-sm mb-3">{error}</p>
+            <button onClick={loadData} className="px-4 py-2 rounded-lg text-sm font-medium text-white" style={{ background: '#1a6b3c' }}>
+              Reintentar
+            </button>
+          </div>
+        ) : rounds.length === 0 ? (
           <div className="text-center py-20 text-golf-muted">
             <p className="text-5xl mb-4">📋</p>
             <p className="text-lg font-display text-golf-text">Sin rondas registradas</p>

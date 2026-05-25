@@ -11,6 +11,7 @@ import {
 } from '@/lib/storage';
 import { generateId } from '@/lib/utils';
 import toast from 'react-hot-toast';
+import LoadingSpinner from '@/components/LoadingSpinner';
 
 type Tab = 'jugadores' | 'palos' | 'canchas';
 
@@ -57,40 +58,55 @@ export default function AdminPage() {
 function JugadoresTab() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [name, setName] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => { setPlayers(getPlayers()); }, []);
+  useEffect(() => {
+    getPlayers().then(setPlayers).catch(() => toast.error('Error al cargar jugadores')).finally(() => setLoading(false));
+  }, []);
 
-  const handleAdd = (e: React.FormEvent) => {
+  const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    addPlayer({ id: generateId(), name: name.trim(), createdAt: new Date().toISOString() });
-    setPlayers(getPlayers());
-    setName('');
-    toast.success('Jugador agregado');
+    try {
+      const p = await addPlayer({ name: name.trim() });
+      setPlayers(prev => [...prev, p]);
+      setName('');
+      toast.success('Jugador agregado');
+    } catch {
+      toast.error('Error al agregar jugador');
+    }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('¿Eliminar este jugador?')) return;
-    deletePlayer(id);
-    setPlayers(getPlayers());
-    toast.success('Jugador eliminado');
+    try {
+      await deletePlayer(id);
+      setPlayers(prev => prev.filter(p => p.id !== id));
+      toast.success('Jugador eliminado');
+    } catch {
+      toast.error('Error al eliminar jugador');
+    }
   };
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       <div className="rounded-xl p-5" style={{ background: '#1a2e20', border: '1px solid #2a4530' }}>
         <h2 className="text-lg font-display text-golf-text mb-4">Jugadores</h2>
-        <div className="space-y-2">
-          {players.map(p => (
-            <div key={p.id} className="flex items-center justify-between px-4 py-3 rounded-lg" style={{ background: '#223829' }}>
-              <span className="text-golf-text">{p.name}</span>
-              <button onClick={() => handleDelete(p.id)} className="text-red-400 hover:text-red-300 text-sm transition-colors px-2 py-1" style={{ minHeight: '44px' }}>
-                Eliminar
-              </button>
-            </div>
-          ))}
-          {players.length === 0 && <p className="text-golf-muted text-sm">Sin jugadores</p>}
-        </div>
+        {loading ? (
+          <div className="flex justify-center py-6"><LoadingSpinner /></div>
+        ) : (
+          <div className="space-y-2">
+            {players.map(p => (
+              <div key={p.id} className="flex items-center justify-between px-4 py-3 rounded-lg" style={{ background: '#223829' }}>
+                <span className="text-golf-text">{p.name}</span>
+                <button onClick={() => handleDelete(p.id)} className="text-red-400 hover:text-red-300 text-sm transition-colors px-2 py-1" style={{ minHeight: '44px' }}>
+                  Eliminar
+                </button>
+              </div>
+            ))}
+            {players.length === 0 && <p className="text-golf-muted text-sm">Sin jugadores</p>}
+          </div>
+        )}
       </div>
 
       <div className="rounded-xl p-5" style={{ background: '#1a2e20', border: '1px solid #2a4530' }}>
@@ -123,40 +139,55 @@ function JugadoresTab() {
 function PalosTab() {
   const [clubs, setClubs] = useState<Club[]>([]);
   const [name, setName] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => { setClubs(getClubs()); }, []);
+  useEffect(() => {
+    getClubs().then(setClubs).catch(() => toast.error('Error al cargar palos')).finally(() => setLoading(false));
+  }, []);
 
-  const handleAdd = (e: React.FormEvent) => {
+  const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    addClub({ id: generateId(), name: name.trim() });
-    setClubs(getClubs());
-    setName('');
-    toast.success('Palo agregado');
+    try {
+      const c = await addClub({ name: name.trim() });
+      setClubs(prev => [...prev, c]);
+      setName('');
+      toast.success('Palo agregado');
+    } catch {
+      toast.error('Error al agregar palo');
+    }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('¿Eliminar este palo?')) return;
-    deleteClub(id);
-    setClubs(getClubs());
-    toast.success('Palo eliminado');
+    try {
+      await deleteClub(id);
+      setClubs(prev => prev.filter(c => c.id !== id));
+      toast.success('Palo eliminado');
+    } catch {
+      toast.error('Error al eliminar palo');
+    }
   };
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       <div className="rounded-xl p-5" style={{ background: '#1a2e20', border: '1px solid #2a4530' }}>
         <h2 className="text-lg font-display text-golf-text mb-4">Palos</h2>
-        <div className="space-y-2">
-          {clubs.map(c => (
-            <div key={c.id} className="flex items-center justify-between px-4 py-3 rounded-lg" style={{ background: '#223829' }}>
-              <span className="text-golf-text">🏌️ {c.name}</span>
-              <button onClick={() => handleDelete(c.id)} className="text-red-400 hover:text-red-300 text-sm transition-colors px-2 py-1" style={{ minHeight: '44px' }}>
-                Eliminar
-              </button>
-            </div>
-          ))}
-          {clubs.length === 0 && <p className="text-golf-muted text-sm">Sin palos</p>}
-        </div>
+        {loading ? (
+          <div className="flex justify-center py-6"><LoadingSpinner /></div>
+        ) : (
+          <div className="space-y-2">
+            {clubs.map(c => (
+              <div key={c.id} className="flex items-center justify-between px-4 py-3 rounded-lg" style={{ background: '#223829' }}>
+                <span className="text-golf-text">🏌️ {c.name}</span>
+                <button onClick={() => handleDelete(c.id)} className="text-red-400 hover:text-red-300 text-sm transition-colors px-2 py-1" style={{ minHeight: '44px' }}>
+                  Eliminar
+                </button>
+              </div>
+            ))}
+            {clubs.length === 0 && <p className="text-golf-muted text-sm">Sin palos</p>}
+          </div>
+        )}
       </div>
 
       <div className="rounded-xl p-5" style={{ background: '#1a2e20', border: '1px solid #2a4530' }}>
@@ -192,32 +223,40 @@ function CanchasTab() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [name, setName] = useState('');
   const [numHoles, setNumHoles] = useState<9 | 18>(18);
-  // Panel shown below the list
   const [panel, setPanel] = useState<CoursePanel>(null);
-  // Newly created course to auto-open holes editor
   const [newCoursePanel, setNewCoursePanel] = useState<Course | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => { setCourses(getCourses()); }, []);
+  useEffect(() => {
+    getCourses().then(setCourses).catch(() => toast.error('Error al cargar canchas')).finally(() => setLoading(false));
+  }, []);
 
-  const handleAdd = (e: React.FormEvent) => {
+  const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    const c: Course = { id: generateId(), name: name.trim(), numberOfHoles: numHoles };
-    addCourse(c);
-    setCourses(getCourses());
-    setName('');
-    setNewCoursePanel(c);
-    setPanel(null);
-    toast.success('Cancha creada. Cargá los hoyos.');
+    try {
+      const c = await addCourse({ name: name.trim(), numberOfHoles: numHoles });
+      setCourses(prev => [...prev, c]);
+      setName('');
+      setNewCoursePanel(c);
+      setPanel(null);
+      toast.success('Cancha creada. Cargá los hoyos.');
+    } catch {
+      toast.error('Error al crear cancha');
+    }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('¿Eliminar esta cancha y todos sus hoyos?')) return;
-    deleteCourse(id);
-    setCourses(getCourses());
-    if (panel?.courseId === id) setPanel(null);
-    if (newCoursePanel?.id === id) setNewCoursePanel(null);
-    toast.success('Cancha eliminada');
+    try {
+      await deleteCourse(id);
+      setCourses(prev => prev.filter(c => c.id !== id));
+      if (panel?.courseId === id) setPanel(null);
+      if (newCoursePanel?.id === id) setNewCoursePanel(null);
+      toast.success('Cancha eliminada');
+    } catch {
+      toast.error('Error al eliminar cancha');
+    }
   };
 
   const openPanel = (type: 'view' | 'edit', courseId: string) => {
@@ -230,7 +269,7 @@ function CanchasTab() {
   };
 
   const handleCourseSaved = (updated: Course) => {
-    setCourses(getCourses());
+    setCourses(prev => prev.map(c => c.id === updated.id ? updated : c));
     setPanel({ type: 'view', courseId: updated.id });
   };
 
@@ -240,42 +279,46 @@ function CanchasTab() {
         {/* List */}
         <div className="rounded-xl p-5" style={{ background: '#1a2e20', border: '1px solid #2a4530' }}>
           <h2 className="text-lg font-display text-golf-text mb-4">Canchas</h2>
-          <div className="space-y-2">
-            {courses.map(c => (
-              <div key={c.id}>
-                <div className="flex items-center justify-between px-4 py-3 rounded-lg" style={{ background: '#223829' }}>
-                  <div>
-                    <span className="text-golf-text font-medium">{c.name}</span>
-                    <span className="text-golf-muted text-sm ml-2">({c.numberOfHoles} hoyos)</span>
-                  </div>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => openPanel('view', c.id)}
-                      className="text-golf-gold text-xs px-2 py-1 rounded transition-colors hover:underline"
-                      style={{ minHeight: '44px' }}
-                    >
-                      Hoyos
-                    </button>
-                    <button
-                      onClick={() => openPanel('edit', c.id)}
-                      className="text-golf-muted text-xs px-2 py-1 rounded transition-colors hover:text-golf-text"
-                      style={{ minHeight: '44px' }}
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(c.id)}
-                      className="text-red-400 hover:text-red-300 text-xs px-2 py-1 rounded"
-                      style={{ minHeight: '44px' }}
-                    >
-                      ✕
-                    </button>
+          {loading ? (
+            <div className="flex justify-center py-6"><LoadingSpinner /></div>
+          ) : (
+            <div className="space-y-2">
+              {courses.map(c => (
+                <div key={c.id}>
+                  <div className="flex items-center justify-between px-4 py-3 rounded-lg" style={{ background: '#223829' }}>
+                    <div>
+                      <span className="text-golf-text font-medium">{c.name}</span>
+                      <span className="text-golf-muted text-sm ml-2">({c.numberOfHoles} hoyos)</span>
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => openPanel('view', c.id)}
+                        className="text-golf-gold text-xs px-2 py-1 rounded transition-colors hover:underline"
+                        style={{ minHeight: '44px' }}
+                      >
+                        Hoyos
+                      </button>
+                      <button
+                        onClick={() => openPanel('edit', c.id)}
+                        className="text-golf-muted text-xs px-2 py-1 rounded transition-colors hover:text-golf-text"
+                        style={{ minHeight: '44px' }}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => handleDelete(c.id)}
+                        className="text-red-400 hover:text-red-300 text-xs px-2 py-1 rounded"
+                        style={{ minHeight: '44px' }}
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-            {courses.length === 0 && <p className="text-golf-muted text-sm">Sin canchas registradas</p>}
-          </div>
+              ))}
+              {courses.length === 0 && <p className="text-golf-muted text-sm">Sin canchas registradas</p>}
+            </div>
+          )}
         </div>
 
         {/* New course form */}
@@ -374,35 +417,30 @@ function CourseEditForm({ course, onSave, onCancel }: { course: Course; onSave: 
   const [name, setName] = useState(course.name);
   const [numHoles, setNumHoles] = useState<9 | 18>(course.numberOfHoles as 9 | 18);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
 
     const updatedCourse: Course = { ...course, name: name.trim(), numberOfHoles: numHoles };
-    updateCourse(updatedCourse);
+    try {
+      await updateCourse(updatedCourse);
 
-    // If numberOfHoles increased, add missing holes
-    const existing = getHolesForCourse(course.id);
-    if (numHoles > existing.length) {
-      const newHoles: CourseHole[] = [];
-      for (let i = existing.length + 1; i <= numHoles; i++) {
-        newHoles.push({
-          id: generateId(),
-          courseId: course.id,
-          holeNumber: i,
-          par: 4,
-          description: '',
-          yards: 0,
-        });
+      const existing = await getHolesForCourse(course.id);
+      if (numHoles > existing.length) {
+        const newHoles: CourseHole[] = [];
+        for (let i = existing.length + 1; i <= numHoles; i++) {
+          newHoles.push({ id: generateId(), courseId: course.id, holeNumber: i, par: 4, description: '', yards: 0 });
+        }
+        await saveHolesForCourse(course.id, [...existing, ...newHoles]);
+      } else if (numHoles < existing.length) {
+        await saveHolesForCourse(course.id, existing.filter(h => h.holeNumber <= numHoles));
       }
-      saveHolesForCourse(course.id, [...existing, ...newHoles]);
-    } else if (numHoles < existing.length) {
-      // Truncate: keep only holes 1..numHoles
-      saveHolesForCourse(course.id, existing.filter(h => h.holeNumber <= numHoles));
-    }
 
-    toast.success('Cancha actualizada');
-    onSave(updatedCourse);
+      toast.success('Cancha actualizada');
+      onSave(updatedCourse);
+    } catch {
+      toast.error('Error al actualizar cancha');
+    }
   };
 
   return (
@@ -471,34 +509,50 @@ function CourseEditForm({ course, onSave, onCancel }: { course: Course; onSave: 
 
 function HolesEditor({ course, onSave }: { course: Course; onSave?: () => void }) {
   const [holes, setHoles] = useState<CourseHole[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const existing = getHolesForCourse(course.id);
-    if (existing.length > 0) {
-      setHoles(existing);
-    } else {
-      setHoles(
-        Array.from({ length: course.numberOfHoles }, (_, i) => ({
-          id: generateId(),
-          courseId: course.id,
-          holeNumber: i + 1,
-          par: 4 as 3 | 4 | 5,
-          description: '',
-          yards: 0,
-        }))
-      );
+    async function loadHoles() {
+      try {
+        const existing = await getHolesForCourse(course.id);
+        if (existing.length > 0) {
+          setHoles(existing);
+        } else {
+          setHoles(
+            Array.from({ length: course.numberOfHoles }, (_, i) => ({
+              id: generateId(),
+              courseId: course.id,
+              holeNumber: i + 1,
+              par: 4 as 3 | 4 | 5,
+              description: '',
+              yards: 0,
+            }))
+          );
+        }
+      } catch {
+        toast.error('Error al cargar hoyos');
+      } finally {
+        setLoading(false);
+      }
     }
+    loadHoles();
   }, [course.id, course.numberOfHoles]);
 
   const updateHole = (index: number, field: keyof CourseHole, value: string | number) => {
     setHoles(prev => prev.map((h, i) => i === index ? { ...h, [field]: value } : h));
   };
 
-  const handleSave = () => {
-    saveHolesForCourse(course.id, holes);
-    toast.success('Hoyos guardados');
-    onSave?.();
+  const handleSave = async () => {
+    try {
+      await saveHolesForCourse(course.id, holes);
+      toast.success('Hoyos guardados');
+      onSave?.();
+    } catch {
+      toast.error('Error al guardar hoyos');
+    }
   };
+
+  if (loading) return <div className="flex justify-center py-6"><LoadingSpinner /></div>;
 
   return (
     <div className="mt-2">

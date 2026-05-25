@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getSession, initializeDefaults } from '@/lib/storage';
+import { getSession } from '@/lib/storage';
 import Sidebar from './Sidebar';
 import BottomNav from './BottomNav';
 
@@ -12,7 +12,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    initializeDefaults();
     if (!getSession()) {
       router.replace('/');
     } else {

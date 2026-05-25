@@ -1,239 +1,317 @@
+import { supabase } from './supabase';
 import { Player, Club, ShotResult, Course, CourseHole, Round, RoundPlayer, HoleScore, HoleStats, Shot } from './types';
-import { DEFAULT_PLAYERS, DEFAULT_CLUBS, DEFAULT_SHOT_RESULTS } from './defaults';
 
-const KEYS = {
-  INITIALIZED: 'gt_initialized',
-  SESSION: 'gt_session',
-  PLAYERS: 'gt_players',
-  CLUBS: 'gt_clubs',
-  SHOT_RESULTS: 'gt_shot_results',
-  COURSES: 'gt_courses',
-  COURSE_HOLES: 'gt_course_holes',
-  ROUNDS: 'gt_rounds',
-  ROUND_PLAYERS: 'gt_round_players',
-  HOLE_SCORES: 'gt_hole_scores',
-  HOLE_STATS: 'gt_hole_stats',
-  SHOTS: 'gt_shots',
-};
+// ─── Session (sessionStorage — sin Supabase Auth) ──────────────────────────
 
-function getItem<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function setItem<T>(key: string, value: T): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (e) {
-    console.error('localStorage error:', e);
-  }
-}
-
-export function initializeDefaults(): void {
-  if (getItem<boolean>(KEYS.INITIALIZED, false)) return;
-  setItem(KEYS.PLAYERS, DEFAULT_PLAYERS);
-  setItem(KEYS.CLUBS, DEFAULT_CLUBS);
-  setItem(KEYS.SHOT_RESULTS, DEFAULT_SHOT_RESULTS);
-  setItem(KEYS.COURSES, []);
-  setItem(KEYS.COURSE_HOLES, []);
-  setItem(KEYS.ROUNDS, []);
-  setItem(KEYS.ROUND_PLAYERS, []);
-  setItem(KEYS.HOLE_SCORES, []);
-  setItem(KEYS.HOLE_STATS, []);
-  setItem(KEYS.SHOTS, []);
-  setItem(KEYS.INITIALIZED, true);
-}
-
-// Session
 export function getSession(): boolean {
-  return getItem<boolean>(KEYS.SESSION, false);
+  try { return sessionStorage.getItem('gt_session') === 'true'; } catch { return false; }
 }
 export function saveSession(value: boolean): void {
-  setItem(KEYS.SESSION, value);
+  try { sessionStorage.setItem('gt_session', value ? 'true' : 'false'); } catch {}
 }
 
-// Players
-export function getPlayers(): Player[] {
-  return getItem<Player[]>(KEYS.PLAYERS, []);
-}
-export function savePlayers(players: Player[]): void {
-  setItem(KEYS.PLAYERS, players);
-}
-export function addPlayer(player: Player): void {
-  savePlayers([...getPlayers(), player]);
-}
-export function deletePlayer(id: string): void {
-  savePlayers(getPlayers().filter(p => p.id !== id));
+// ─── Players ───────────────────────────────────────────────────────────────
+
+export async function getPlayers(): Promise<Player[]> {
+  const { data, error } = await supabase.from('players').select('*').order('created_at');
+  if (error) throw error;
+  return (data ?? []).map(r => ({ id: r.id, name: r.name, createdAt: r.created_at }));
 }
 
-// Clubs
-export function getClubs(): Club[] {
-  return getItem<Club[]>(KEYS.CLUBS, []);
-}
-export function saveClubs(clubs: Club[]): void {
-  setItem(KEYS.CLUBS, clubs);
-}
-export function addClub(club: Club): void {
-  saveClubs([...getClubs(), club]);
-}
-export function deleteClub(id: string): void {
-  saveClubs(getClubs().filter(c => c.id !== id));
+export async function addPlayer(player: { name: string }): Promise<Player> {
+  const { data, error } = await supabase
+    .from('players').insert({ name: player.name }).select().single();
+  if (error) throw error;
+  return { id: data.id, name: data.name, createdAt: data.created_at };
 }
 
-// Shot Results
-export function getShotResults(): ShotResult[] {
-  return getItem<ShotResult[]>(KEYS.SHOT_RESULTS, []);
-}
-export function saveShotResults(results: ShotResult[]): void {
-  setItem(KEYS.SHOT_RESULTS, results);
+export async function deletePlayer(id: string): Promise<void> {
+  const { error } = await supabase.from('players').delete().eq('id', id);
+  if (error) throw error;
 }
 
-// Courses
-export function getCourses(): Course[] {
-  return getItem<Course[]>(KEYS.COURSES, []);
-}
-export function saveCourses(courses: Course[]): void {
-  setItem(KEYS.COURSES, courses);
-}
-export function addCourse(course: Course): void {
-  saveCourses([...getCourses(), course]);
-}
-export function updateCourse(course: Course): void {
-  saveCourses(getCourses().map(c => c.id === course.id ? course : c));
-}
-export function deleteCourse(id: string): void {
-  saveCourses(getCourses().filter(c => c.id !== id));
-  saveCourseHoles(getCourseHoles().filter(h => h.courseId !== id));
+// ─── Clubs ─────────────────────────────────────────────────────────────────
+
+export async function getClubs(): Promise<Club[]> {
+  const { data, error } = await supabase.from('clubs').select('*').order('created_at');
+  if (error) throw error;
+  return (data ?? []).map(r => ({ id: r.id, name: r.name }));
 }
 
-// Course Holes
-export function getCourseHoles(): CourseHole[] {
-  return getItem<CourseHole[]>(KEYS.COURSE_HOLES, []);
-}
-export function saveCourseHoles(holes: CourseHole[]): void {
-  setItem(KEYS.COURSE_HOLES, holes);
-}
-export function getHolesForCourse(courseId: string): CourseHole[] {
-  return getCourseHoles().filter(h => h.courseId === courseId).sort((a, b) => a.holeNumber - b.holeNumber);
-}
-export function saveHolesForCourse(courseId: string, holes: CourseHole[]): void {
-  const allHoles = getCourseHoles().filter(h => h.courseId !== courseId);
-  saveCourseHoles([...allHoles, ...holes]);
+export async function addClub(club: { name: string }): Promise<Club> {
+  const { data, error } = await supabase
+    .from('clubs').insert({ name: club.name }).select().single();
+  if (error) throw error;
+  return { id: data.id, name: data.name };
 }
 
-// Rounds
-export function getRounds(): Round[] {
-  return getItem<Round[]>(KEYS.ROUNDS, []);
-}
-export function saveRounds(rounds: Round[]): void {
-  setItem(KEYS.ROUNDS, rounds);
-}
-export function getRound(id: string): Round | undefined {
-  return getRounds().find(r => r.id === id);
-}
-export function addRound(round: Round): void {
-  saveRounds([...getRounds(), round]);
-}
-export function updateRound(round: Round): void {
-  saveRounds(getRounds().map(r => r.id === round.id ? round : r));
+export async function deleteClub(id: string): Promise<void> {
+  const { error } = await supabase.from('clubs').delete().eq('id', id);
+  if (error) throw error;
 }
 
-// Round Players
-export function getRoundPlayers(): RoundPlayer[] {
-  return getItem<RoundPlayer[]>(KEYS.ROUND_PLAYERS, []);
-}
-export function saveRoundPlayers(rps: RoundPlayer[]): void {
-  setItem(KEYS.ROUND_PLAYERS, rps);
-}
-export function getRoundPlayersForRound(roundId: string): RoundPlayer[] {
-  return getRoundPlayers().filter(rp => rp.roundId === roundId);
-}
-export function addRoundPlayers(rps: RoundPlayer[]): void {
-  saveRoundPlayers([...getRoundPlayers(), ...rps]);
-}
-export function updateRoundPlayer(rp: RoundPlayer): void {
-  saveRoundPlayers(getRoundPlayers().map(r => r.id === rp.id ? rp : r));
+// ─── Shot Results ──────────────────────────────────────────────────────────
+
+export async function getShotResults(): Promise<ShotResult[]> {
+  const { data, error } = await supabase.from('shot_results').select('*').order('id');
+  if (error) throw error;
+  return (data ?? []).map(r => ({ id: r.id, name: r.name }));
 }
 
-// Remove a player from a round (deletes all their data for that round)
-export function removePlayerFromRound(roundId: string, playerId: string): void {
-  saveRoundPlayers(getRoundPlayers().filter(rp => !(rp.roundId === roundId && rp.playerId === playerId)));
-  saveHoleScores(getHoleScores().filter(s => !(s.roundId === roundId && s.playerId === playerId)));
-  saveHoleStatsAll(getHoleStatsAll().filter(s => !(s.roundId === roundId && s.playerId === playerId)));
-  saveShots(getShots().filter(s => !(s.roundId === roundId && s.playerId === playerId)));
+// ─── Courses ───────────────────────────────────────────────────────────────
+
+export async function getCourses(): Promise<Course[]> {
+  const { data, error } = await supabase.from('courses').select('*').order('created_at');
+  if (error) throw error;
+  return (data ?? []).map(r => ({ id: r.id, name: r.name, numberOfHoles: r.number_of_holes }));
 }
 
-// Hole Scores
-export function getHoleScores(): HoleScore[] {
-  return getItem<HoleScore[]>(KEYS.HOLE_SCORES, []);
-}
-export function saveHoleScores(scores: HoleScore[]): void {
-  setItem(KEYS.HOLE_SCORES, scores);
-}
-export function getHoleScoresForRound(roundId: string): HoleScore[] {
-  return getHoleScores().filter(s => s.roundId === roundId);
-}
-export function upsertHoleScore(score: HoleScore): void {
-  const all = getHoleScores();
-  const idx = all.findIndex(s => s.roundId === score.roundId && s.playerId === score.playerId && s.holeNumber === score.holeNumber);
-  if (idx >= 0) {
-    all[idx] = score;
-  } else {
-    all.push(score);
-  }
-  saveHoleScores(all);
+export async function addCourse(course: { name: string; numberOfHoles: number }): Promise<Course> {
+  const { data, error } = await supabase
+    .from('courses')
+    .insert({ name: course.name, number_of_holes: course.numberOfHoles })
+    .select().single();
+  if (error) throw error;
+  return { id: data.id, name: data.name, numberOfHoles: data.number_of_holes };
 }
 
-// Hole Stats
-export function getHoleStatsAll(): HoleStats[] {
-  return getItem<HoleStats[]>(KEYS.HOLE_STATS, []);
-}
-export function saveHoleStatsAll(stats: HoleStats[]): void {
-  setItem(KEYS.HOLE_STATS, stats);
-}
-export function getHoleStatsForRound(roundId: string): HoleStats[] {
-  return getHoleStatsAll().filter(s => s.roundId === roundId);
-}
-export function getHoleStatsForPlayer(roundId: string, playerId: string, holeNumber: number): HoleStats | undefined {
-  return getHoleStatsAll().find(s => s.roundId === roundId && s.playerId === playerId && s.holeNumber === holeNumber);
-}
-export function upsertHoleStats(stats: HoleStats): void {
-  const all = getHoleStatsAll();
-  const idx = all.findIndex(s => s.roundId === stats.roundId && s.playerId === stats.playerId && s.holeNumber === stats.holeNumber);
-  if (idx >= 0) {
-    all[idx] = stats;
-  } else {
-    all.push(stats);
-  }
-  saveHoleStatsAll(all);
+export async function updateCourse(course: Course): Promise<void> {
+  const { error } = await supabase
+    .from('courses')
+    .update({ name: course.name, number_of_holes: course.numberOfHoles })
+    .eq('id', course.id);
+  if (error) throw error;
 }
 
-// Shots
-export function getShots(): Shot[] {
-  return getItem<Shot[]>(KEYS.SHOTS, []);
+export async function deleteCourse(id: string): Promise<void> {
+  await supabase.from('course_holes').delete().eq('course_id', id);
+  const { error } = await supabase.from('courses').delete().eq('id', id);
+  if (error) throw error;
 }
-export function saveShots(shots: Shot[]): void {
-  setItem(KEYS.SHOTS, shots);
+
+// ─── Course Holes ──────────────────────────────────────────────────────────
+
+export async function getHolesForCourse(courseId: string): Promise<CourseHole[]> {
+  const { data, error } = await supabase
+    .from('course_holes').select('*').eq('course_id', courseId).order('hole_number');
+  if (error) throw error;
+  return (data ?? []).map(r => ({
+    id: r.id, courseId: r.course_id, holeNumber: r.hole_number,
+    par: r.par as 3|4|5, description: r.description ?? '', yards: r.yards ?? 0,
+  }));
 }
-export function getShotsForRound(roundId: string): Shot[] {
-  return getShots().filter(s => s.roundId === roundId);
+
+export async function saveHolesForCourse(courseId: string, holes: CourseHole[]): Promise<void> {
+  await supabase.from('course_holes').delete().eq('course_id', courseId);
+  if (holes.length === 0) return;
+  const rows = holes.map(h => ({
+    course_id: h.courseId,
+    hole_number: h.holeNumber,
+    par: h.par,
+    description: h.description,
+    yards: h.yards,
+  }));
+  const { error } = await supabase.from('course_holes').insert(rows);
+  if (error) throw error;
 }
-export function getShotsForHole(roundId: string, playerId: string, holeNumber: number): Shot[] {
-  return getShots()
-    .filter(s => s.roundId === roundId && s.playerId === playerId && s.holeNumber === holeNumber)
-    .sort((a, b) => a.shotNumber - b.shotNumber);
+
+// ─── Rounds ────────────────────────────────────────────────────────────────
+
+export async function getRounds(): Promise<Round[]> {
+  const { data, error } = await supabase
+    .from('rounds').select('*').order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(toRound);
 }
-export function addShot(shot: Shot): void {
-  saveShots([...getShots(), shot]);
+
+export async function getRound(id: string): Promise<Round | null> {
+  const { data, error } = await supabase.from('rounds').select('*').eq('id', id).maybeSingle();
+  if (error || !data) return null;
+  return toRound(data);
 }
-export function deleteShot(id: string): void {
-  saveShots(getShots().filter(s => s.id !== id));
+
+export async function addRound(data: Omit<Round, 'id'|'createdAt'>): Promise<Round> {
+  const { data: row, error } = await supabase
+    .from('rounds')
+    .insert({ date: data.date, course_id: data.courseId, holes_played: data.holesPlayed, status: data.status })
+    .select().single();
+  if (error) throw error;
+  return toRound(row);
 }
-export function deleteShotsForHole(roundId: string, playerId: string, holeNumber: number): void {
-  saveShots(getShots().filter(s => !(s.roundId === roundId && s.playerId === playerId && s.holeNumber === holeNumber)));
+
+export async function updateRound(round: Round): Promise<void> {
+  const { error } = await supabase
+    .from('rounds')
+    .update({ date: round.date, course_id: round.courseId, holes_played: round.holesPlayed, status: round.status })
+    .eq('id', round.id);
+  if (error) throw error;
+}
+
+function toRound(r: Record<string, unknown>): Round {
+  return {
+    id: r.id as string, date: r.date as string, courseId: r.course_id as string,
+    holesPlayed: r.holes_played as 9|18, status: r.status as 'in_progress'|'completed',
+    createdAt: r.created_at as string,
+  };
+}
+
+// ─── Round Players ─────────────────────────────────────────────────────────
+
+export async function getRoundPlayersForRound(roundId: string): Promise<RoundPlayer[]> {
+  const { data, error } = await supabase.from('round_players').select('*').eq('round_id', roundId);
+  if (error) throw error;
+  return (data ?? []).map(toRoundPlayer);
+}
+
+export async function getAllRoundPlayers(): Promise<RoundPlayer[]> {
+  const { data, error } = await supabase.from('round_players').select('*');
+  if (error) throw error;
+  return (data ?? []).map(toRoundPlayer);
+}
+
+export async function addRoundPlayers(rps: Omit<RoundPlayer, 'id'>[]): Promise<RoundPlayer[]> {
+  const rows = rps.map(r => ({ round_id: r.roundId, player_id: r.playerId, tracking_level: r.trackingLevel }));
+  const { data, error } = await supabase.from('round_players').insert(rows).select();
+  if (error) throw error;
+  return (data ?? []).map(toRoundPlayer);
+}
+
+export async function removePlayerFromRound(roundId: string, playerId: string): Promise<void> {
+  await Promise.all([
+    supabase.from('round_players').delete().eq('round_id', roundId).eq('player_id', playerId),
+    supabase.from('hole_scores').delete().eq('round_id', roundId).eq('player_id', playerId),
+    supabase.from('hole_stats').delete().eq('round_id', roundId).eq('player_id', playerId),
+    supabase.from('shots').delete().eq('round_id', roundId).eq('player_id', playerId),
+  ]);
+}
+
+function toRoundPlayer(r: Record<string, unknown>): RoundPlayer {
+  return {
+    id: r.id as string, roundId: r.round_id as string, playerId: r.player_id as string,
+    trackingLevel: r.tracking_level as 'score'|'stats'|'shots',
+  };
+}
+
+// ─── Hole Scores ───────────────────────────────────────────────────────────
+
+export async function getHoleScoresForRound(roundId: string): Promise<HoleScore[]> {
+  const { data, error } = await supabase.from('hole_scores').select('*').eq('round_id', roundId);
+  if (error) throw error;
+  return (data ?? []).map(r => ({
+    id: r.id, roundId: r.round_id, playerId: r.player_id,
+    holeNumber: r.hole_number, strokes: r.strokes,
+  }));
+}
+
+export async function upsertHoleScore(score: Omit<HoleScore, 'id'>): Promise<void> {
+  const { error } = await supabase.from('hole_scores').upsert(
+    { round_id: score.roundId, player_id: score.playerId, hole_number: score.holeNumber, strokes: score.strokes },
+    { onConflict: 'round_id,player_id,hole_number' }
+  );
+  if (error) throw error;
+}
+
+// ─── Hole Stats ────────────────────────────────────────────────────────────
+
+export async function getHoleStatsForRound(roundId: string): Promise<HoleStats[]> {
+  const { data, error } = await supabase.from('hole_stats').select('*').eq('round_id', roundId);
+  if (error) throw error;
+  return (data ?? []).map(toHoleStats);
+}
+
+export async function getHoleStatsForPlayer(roundId: string, playerId: string, holeNumber: number): Promise<HoleStats | null> {
+  const { data, error } = await supabase
+    .from('hole_stats').select('*')
+    .eq('round_id', roundId).eq('player_id', playerId).eq('hole_number', holeNumber)
+    .maybeSingle();
+  if (error || !data) return null;
+  return toHoleStats(data);
+}
+
+// Accepts the full HoleStats object; the id field is ignored (upsert uses composite key)
+export async function upsertHoleStats(stats: HoleStats | Omit<HoleStats, 'id'>): Promise<void> {
+  const { error } = await supabase.from('hole_stats').upsert(
+    {
+      round_id: stats.roundId, player_id: stats.playerId, hole_number: stats.holeNumber,
+      strokes: stats.strokes, fairway_hit: stats.fairwayHit, green_hit: stats.greenHit,
+      in_bunker: stats.inBunker, penalty: stats.penalty, putts: stats.putts, gir: stats.gir,
+    },
+    { onConflict: 'round_id,player_id,hole_number' }
+  );
+  if (error) throw error;
+}
+
+function toHoleStats(r: Record<string, unknown>): HoleStats {
+  return {
+    id: r.id as string, roundId: r.round_id as string, playerId: r.player_id as string,
+    holeNumber: r.hole_number as number, strokes: r.strokes as number,
+    fairwayHit: r.fairway_hit as boolean|null, greenHit: r.green_hit as boolean|null,
+    inBunker: r.in_bunker as boolean, penalty: r.penalty as boolean,
+    putts: r.putts as number, gir: r.gir as boolean,
+  };
+}
+
+// ─── Shots ─────────────────────────────────────────────────────────────────
+
+export async function getShotsForRound(roundId: string): Promise<Shot[]> {
+  const { data, error } = await supabase
+    .from('shots').select('*').eq('round_id', roundId)
+    .order('hole_number').order('shot_number');
+  if (error) throw error;
+  return (data ?? []).map(toShot);
+}
+
+export async function getShotsForHole(roundId: string, playerId: string, holeNumber: number): Promise<Shot[]> {
+  const { data, error } = await supabase
+    .from('shots').select('*')
+    .eq('round_id', roundId).eq('player_id', playerId).eq('hole_number', holeNumber)
+    .order('shot_number');
+  if (error) throw error;
+  return (data ?? []).map(toShot);
+}
+
+export async function addShot(shot: Omit<Shot, 'id'>): Promise<Shot> {
+  const { data, error } = await supabase
+    .from('shots')
+    .insert({
+      round_id: shot.roundId, player_id: shot.playerId, hole_number: shot.holeNumber,
+      shot_number: shot.shotNumber, club_id: shot.clubId, start_position: shot.startPosition,
+      result: shot.result, yards: shot.yards, is_penalty: shot.isPenalty,
+    })
+    .select().single();
+  if (error) throw error;
+  return toShot(data);
+}
+
+export async function updateShot(id: string, data: Partial<Omit<Shot, 'id'>>): Promise<void> {
+  const updates: Record<string, unknown> = {};
+  if (data.clubId !== undefined) updates.club_id = data.clubId;
+  if (data.result !== undefined) updates.result = data.result;
+  if (data.yards !== undefined) updates.yards = data.yards;
+  if (data.startPosition !== undefined) updates.start_position = data.startPosition;
+  if (data.shotNumber !== undefined) updates.shot_number = data.shotNumber;
+  if (data.isPenalty !== undefined) updates.is_penalty = data.isPenalty;
+  const { error } = await supabase.from('shots').update(updates).eq('id', id);
+  if (error) throw error;
+}
+
+export async function deleteShot(id: string): Promise<void> {
+  const { error } = await supabase.from('shots').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function deleteShotsForHole(roundId: string, playerId: string, holeNumber: number): Promise<void> {
+  const { error } = await supabase
+    .from('shots').delete()
+    .eq('round_id', roundId).eq('player_id', playerId).eq('hole_number', holeNumber);
+  if (error) throw error;
+}
+
+function toShot(r: Record<string, unknown>): Shot {
+  return {
+    id: r.id as string, roundId: r.round_id as string, playerId: r.player_id as string,
+    holeNumber: r.hole_number as number, shotNumber: r.shot_number as number,
+    clubId: r.club_id as string, startPosition: r.start_position as string,
+    result: r.result as string, yards: r.yards as number, isPenalty: r.is_penalty as boolean,
+  };
 }

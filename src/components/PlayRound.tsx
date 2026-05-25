@@ -1,16 +1,17 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Round, RoundPlayer, CourseHole, Player, Shot, HoleStats } from '@/lib/types';
+import { Round, RoundPlayer, CourseHole, Player, Shot, HoleStats, Club, ShotResult } from '@/lib/types';
 import {
   getClubs, getShotResults,
   getShotsForHole, addShot, deleteShot,
-  upsertHoleScore, getHoleScores, updateRound, getShots, saveShots,
+  upsertHoleScore, getHoleScoresForRound, updateRound,
   getHoleStatsForPlayer, upsertHoleStats, removePlayerFromRound,
-  getRoundPlayersForRound,
+  getRoundPlayersForRound, updateShot,
 } from '@/lib/storage';
 import { generateId, resolveHoleNumber } from '@/lib/utils';
 import toast from 'react-hot-toast';
+import LoadingSpinner from './LoadingSpinner';
 
 interface Props {
   round: Round;
@@ -18,21 +19,35 @@ interface Props {
   courseHoles: CourseHole[];
   players: Player[];
   onComplete: () => void;
-  onRoundPlayersChange?: () => void;
 }
 
 export default function PlayRound({ round, roundPlayers: initialRoundPlayers, courseHoles, players, onComplete }: Props) {
   const [currentHole, setCurrentHole] = useState(1);
   const [roundPlayers, setRoundPlayers] = useState(initialRoundPlayers);
-  const [clubs] = useState(getClubs());
-  const [shotResults] = useState(getShotResults());
+  const [clubs, setClubs] = useState<Club[]>([]);
+  const [shotResults, setShotResults] = useState<ShotResult[]>([]);
+  const [dataReady, setDataReady] = useState(false);
   const [showEditConfig, setShowEditConfig] = useState(false);
   const [editDate, setEditDate] = useState(round.date);
   const [editHolesPlayed, setEditHolesPlayed] = useState<9 | 18>(round.holesPlayed);
-  const [expandedPlayers, setExpandedPlayers] = useState<Set<string>>(() => {
-    // Expand all players by default
-    return new Set(initialRoundPlayers.map(rp => rp.playerId));
-  });
+  const [expandedPlayers, setExpandedPlayers] = useState<Set<string>>(() =>
+    new Set(initialRoundPlayers.map(rp => rp.playerId))
+  );
+
+  useEffect(() => {
+    async function loadStatic() {
+      try {
+        const [c, sr] = await Promise.all([getClubs(), getShotResults()]);
+        setClubs(c);
+        setShotResults(sr);
+      } catch {
+        toast.error('Error al cargar palos');
+      } finally {
+        setDataReady(true);
+      }
+    }
+    loadStatic();
+  }, []);
 
   const totalHoles = round.holesPlayed;
   const courseHoleCount = courseHoles.length;
@@ -45,28 +60,37 @@ export default function PlayRound({ round, roundPlayers: initialRoundPlayers, co
 
   const getPlayerName = (id: string) => players.find(p => p.id === id)?.name || '?';
 
-  const handleComplete = () => {
-    updateRound({ ...round, status: 'completed' });
-    toast.success('¡Ronda completada!');
-    onComplete();
+  const handleComplete = async () => {
+    try {
+      await updateRound({ ...round, status: 'completed' });
+      toast.success('¡Ronda completada!');
+      onComplete();
+    } catch {
+      toast.error('Error al completar ronda');
+    }
   };
 
-  const handleSaveConfig = () => {
-    updateRound({ ...round, date: editDate, holesPlayed: editHolesPlayed });
-    setShowEditConfig(false);
-    toast.success('Configuración actualizada');
-    // Force page refresh via onComplete which navigates to results
+  const handleSaveConfig = async () => {
+    try {
+      await updateRound({ ...round, date: editDate, holesPlayed: editHolesPlayed });
+      setShowEditConfig(false);
+      toast.success('Configuración actualizada');
+    } catch {
+      toast.error('Error al guardar configuración');
+    }
   };
 
-  const handleRemovePlayer = (playerId: string) => {
+  const handleRemovePlayer = async (playerId: string) => {
     const playerName = getPlayerName(playerId);
     if (!confirm(`¿Eliminar a ${playerName} de esta ronda? Se borrarán todos sus datos.`)) return;
-    removePlayerFromRound(round.id, playerId);
-    const updated = getRoundPlayersForRound(round.id);
-    setRoundPlayers(updated);
-    toast.success(`${playerName} eliminado de la ronda`);
-    if (updated.length === 0) {
-      toast('La ronda quedó sin jugadores.');
+    try {
+      await removePlayerFromRound(round.id, playerId);
+      const updated = await getRoundPlayersForRound(round.id);
+      setRoundPlayers(updated);
+      toast.success(`${playerName} eliminado de la ronda`);
+      if (updated.length === 0) toast('La ronda quedó sin jugadores.');
+    } catch {
+      toast.error('Error al eliminar jugador');
     }
   };
 
@@ -82,14 +106,18 @@ export default function PlayRound({ round, roundPlayers: initialRoundPlayers, co
   const courseHole = getCourseHole(currentHole);
   const progress = Math.round(((currentHole - 1) / totalHoles) * 100);
 
+  if (!dataReady) {
+    return (
+      <div className="flex items-center justify-center min-h-screen" style={{ background: '#0f1a14' }}>
+        <LoadingSpinner size="lg" message="Cargando..." />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col min-h-screen" style={{ background: '#0f1a14' }}>
       {/* Sticky header */}
-      <div
-        className="sticky top-0 z-10 px-4 py-3"
-        style={{ background: '#1a2e20', borderBottom: '1px solid #2a4530' }}
-      >
-        {/* Title row */}
+      <div className="sticky top-0 z-10 px-4 py-3" style={{ background: '#1a2e20', borderBottom: '1px solid #2a4530' }}>
         <div className="flex items-center justify-between mb-2">
           <h1 className="font-display text-golf-gold text-base md:text-lg">Jugando Ronda</h1>
           <div className="flex gap-2">
@@ -159,13 +187,10 @@ export default function PlayRound({ round, roundPlayers: initialRoundPlayers, co
 
         {/* Progress bar */}
         <div className="mt-2 h-1.5 rounded-full overflow-hidden" style={{ background: '#2a4530' }}>
-          <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{ width: `${progress}%`, background: '#1a6b3c' }}
-          />
+          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progress}%`, background: '#1a6b3c' }} />
         </div>
 
-        {/* Hole dots - scrollable */}
+        {/* Hole dots */}
         <div className="flex gap-1 mt-2 overflow-x-auto pb-1 hide-scrollbar">
           {Array.from({ length: totalHoles }, (_, i) => i + 1).map(h => (
             <button
@@ -207,29 +232,19 @@ export default function PlayRound({ round, roundPlayers: initialRoundPlayers, co
                     key={n}
                     onClick={() => setEditHolesPlayed(n)}
                     className="px-3 py-2 rounded-lg text-sm font-medium"
-                    style={
-                      editHolesPlayed === n
-                        ? { background: '#1a6b3c', color: '#e8f0e9' }
-                        : { background: '#223829', color: '#8aad8f', border: '1px solid #2a4530' }
-                    }
+                    style={editHolesPlayed === n
+                      ? { background: '#1a6b3c', color: '#e8f0e9' }
+                      : { background: '#223829', color: '#8aad8f', border: '1px solid #2a4530' }}
                   >
                     {n}
                   </button>
                 ))}
               </div>
             </div>
-            <button
-              onClick={handleSaveConfig}
-              className="px-4 py-2 rounded-lg text-white text-sm font-medium"
-              style={{ background: '#1a6b3c', minHeight: '40px' }}
-            >
+            <button onClick={handleSaveConfig} className="px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ background: '#1a6b3c', minHeight: '40px' }}>
               Guardar
             </button>
-            <button
-              onClick={() => setShowEditConfig(false)}
-              className="px-4 py-2 rounded-lg text-sm text-golf-muted"
-              style={{ background: '#223829', border: '1px solid #2a4530', minHeight: '40px' }}
-            >
+            <button onClick={() => setShowEditConfig(false)} className="px-4 py-2 rounded-lg text-sm text-golf-muted" style={{ background: '#223829', border: '1px solid #2a4530', minHeight: '40px' }}>
               Cancelar
             </button>
           </div>
@@ -240,47 +255,26 @@ export default function PlayRound({ round, roundPlayers: initialRoundPlayers, co
       <div className="flex-1 p-4 space-y-3 overflow-auto">
         {roundPlayers.map(rp => (
           <div key={rp.id} className="rounded-xl overflow-hidden" style={{ border: '1px solid #2a4530' }}>
-            {/* Player header (tap to expand/collapse) */}
-            <div
-              className="flex items-center justify-between px-4 py-3"
-              style={{ background: '#1a2e20' }}
-            >
-              <button
-                onClick={() => togglePlayer(rp.playerId)}
-                className="flex items-center gap-2 flex-1 text-left"
-                style={{ minHeight: '44px' }}
-              >
-                <span
-                  className="text-xs transition-transform"
-                  style={{ transform: expandedPlayers.has(rp.playerId) ? 'rotate(90deg)' : 'rotate(0deg)' }}
-                >
-                  ▶
-                </span>
+            <div className="flex items-center justify-between px-4 py-3" style={{ background: '#1a2e20' }}>
+              <button onClick={() => togglePlayer(rp.playerId)} className="flex items-center gap-2 flex-1 text-left" style={{ minHeight: '44px' }}>
+                <span className="text-xs transition-transform" style={{ transform: expandedPlayers.has(rp.playerId) ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
                 <span className="text-golf-text font-semibold">{getPlayerName(rp.playerId)}</span>
                 <span
                   className="text-xs px-2 py-0.5 rounded-full"
                   style={
-                    rp.trackingLevel === 'shots'
-                      ? { background: '#0f4a28', color: '#2d9e5f' }
-                      : rp.trackingLevel === 'stats'
-                      ? { background: '#1a2e50', color: '#6ba3f0' }
-                      : { background: '#2a3a30', color: '#8aad8f' }
+                    rp.trackingLevel === 'shots' ? { background: '#0f4a28', color: '#2d9e5f' }
+                    : rp.trackingLevel === 'stats' ? { background: '#1a2e50', color: '#6ba3f0' }
+                    : { background: '#2a3a30', color: '#8aad8f' }
                   }
                 >
                   {rp.trackingLevel === 'shots' ? 'Tiro a Tiro' : rp.trackingLevel === 'stats' ? 'Stats' : 'Score'}
                 </span>
               </button>
-              <button
-                onClick={() => handleRemovePlayer(rp.playerId)}
-                className="text-red-400 hover:text-red-300 text-xs px-2 transition-colors"
-                style={{ minHeight: '44px' }}
-                title="Eliminar jugador"
-              >
+              <button onClick={() => handleRemovePlayer(rp.playerId)} className="text-red-400 hover:text-red-300 text-xs px-2 transition-colors" style={{ minHeight: '44px' }} title="Eliminar jugador">
                 ✕
               </button>
             </div>
 
-            {/* Player content */}
             {expandedPlayers.has(rp.playerId) && (
               <div style={{ background: '#182820' }}>
                 {rp.trackingLevel === 'score' && (
@@ -309,12 +303,7 @@ export default function PlayRound({ round, roundPlayers: initialRoundPlayers, co
             onClick={() => setCurrentHole(h => Math.max(1, h - 1))}
             disabled={currentHole === 1}
             className="flex-1 py-3 rounded-xl font-medium transition-all"
-            style={{
-              background: '#223829',
-              border: '1px solid #2a4530',
-              color: currentHole === 1 ? '#2a4530' : '#8aad8f',
-              minHeight: '48px',
-            }}
+            style={{ background: '#223829', border: '1px solid #2a4530', color: currentHole === 1 ? '#2a4530' : '#8aad8f', minHeight: '48px' }}
           >
             ← Anterior
           </button>
@@ -344,22 +333,21 @@ export default function PlayRound({ round, roundPlayers: initialRoundPlayers, co
 // ─── Score only ────────────────────────────────────────────────────────────
 
 function ScoreCard({ roundPlayer, holeNumber, round }: {
-  roundPlayer: RoundPlayer;
-  holeNumber: number;
-  round: Round;
+  roundPlayer: RoundPlayer; holeNumber: number; round: Round;
 }) {
   const [scoreInput, setScoreInput] = useState('');
 
   useEffect(() => {
-    const scores = getHoleScores();
-    const existing = scores.find(s => s.roundId === round.id && s.playerId === roundPlayer.playerId && s.holeNumber === holeNumber);
-    setScoreInput(existing ? String(existing.strokes) : '');
+    getHoleScoresForRound(round.id).then(scores => {
+      const existing = scores.find(s => s.playerId === roundPlayer.playerId && s.holeNumber === holeNumber);
+      setScoreInput(existing ? String(existing.strokes) : '');
+    }).catch(() => {});
   }, [holeNumber, roundPlayer.playerId, round.id]);
 
   const saveScore = (value: string) => {
     const n = parseInt(value);
     if (isNaN(n) || n < 1) return;
-    upsertHoleScore({ id: generateId(), roundId: round.id, playerId: roundPlayer.playerId, holeNumber, strokes: n });
+    void upsertHoleScore({ roundId: round.id, playerId: roundPlayer.playerId, holeNumber, strokes: n });
   };
 
   return (
@@ -392,37 +380,26 @@ function calcGIR(strokes: number, putts: number, par: number, fairwayHit: boolea
 }
 
 function StatsCard({ roundPlayer, holeNumber, courseHole, round }: {
-  roundPlayer: RoundPlayer;
-  holeNumber: number;
-  courseHole: CourseHole | undefined;
-  round: Round;
+  roundPlayer: RoundPlayer; holeNumber: number; courseHole: CourseHole | undefined; round: Round;
 }) {
   const defaultStats: HoleStats = {
-    id: generateId(),
-    roundId: round.id,
-    playerId: roundPlayer.playerId,
-    holeNumber,
-    strokes: 0,
-    fairwayHit: null,
-    greenHit: null,
-    inBunker: false,
-    penalty: false,
-    putts: 0,
-    gir: false,
+    id: generateId(), roundId: round.id, playerId: roundPlayer.playerId,
+    holeNumber, strokes: 0, fairwayHit: null, greenHit: null,
+    inBunker: false, penalty: false, putts: 0, gir: false,
   };
 
   const [stats, setStats] = useState<HoleStats>(defaultStats);
 
   useEffect(() => {
-    const existing = getHoleStatsForPlayer(round.id, roundPlayer.playerId, holeNumber);
-    setStats(existing || { ...defaultStats, id: generateId() });
+    getHoleStatsForPlayer(round.id, roundPlayer.playerId, holeNumber).then(existing => {
+      setStats(existing || { ...defaultStats, id: generateId() });
+    }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [holeNumber, roundPlayer.playerId, round.id]);
 
   const update = useCallback((field: keyof HoleStats, value: boolean | number | null) => {
     setStats(prev => {
       const next = { ...prev, [field]: value };
-      // Recalculate GIR
       const par = courseHole?.par ?? 4;
       next.gir = calcGIR(
         field === 'strokes' ? (value as number) : next.strokes,
@@ -431,12 +408,10 @@ function StatsCard({ roundPlayer, holeNumber, courseHole, round }: {
         field === 'fairwayHit' ? (value as boolean | null) : next.fairwayHit,
         field === 'greenHit' ? (value as boolean | null) : next.greenHit,
       );
-      // Save
-      upsertHoleStats(next);
-      // Also save HoleScore
+      void upsertHoleStats(next);
       const strokes = field === 'strokes' ? (value as number) : next.strokes;
       if (strokes > 0) {
-        upsertHoleScore({ id: generateId(), roundId: round.id, playerId: roundPlayer.playerId, holeNumber, strokes });
+        void upsertHoleScore({ roundId: round.id, playerId: roundPlayer.playerId, holeNumber, strokes });
       }
       return next;
     });
@@ -447,32 +422,19 @@ function StatsCard({ roundPlayer, holeNumber, courseHole, round }: {
 
   return (
     <div className="px-4 py-4 space-y-4">
-      {/* Score + GIR */}
       <div className="flex items-center gap-4">
         <div>
           <label className="block text-xs text-golf-muted mb-1">Golpes</label>
-          <input
-            type="number"
-            inputMode="numeric"
-            value={stats.strokes || ''}
-            onChange={e => update('strokes', Number(e.target.value))}
-            placeholder="0"
-            min={1}
-            max={20}
+          <input type="number" inputMode="numeric" value={stats.strokes || ''} onChange={e => update('strokes', Number(e.target.value))}
+            placeholder="0" min={1} max={20}
             className="w-20 px-3 py-3 rounded-xl text-golf-text text-center text-xl font-bold focus:outline-none focus:ring-2 focus:ring-golf-green"
             style={{ background: '#223829', border: '1px solid #2a4530', fontSize: '20px' }}
           />
         </div>
         <div>
           <label className="block text-xs text-golf-muted mb-1">Putts</label>
-          <input
-            type="number"
-            inputMode="numeric"
-            value={stats.putts || ''}
-            onChange={e => update('putts', Number(e.target.value))}
-            placeholder="0"
-            min={0}
-            max={10}
+          <input type="number" inputMode="numeric" value={stats.putts || ''} onChange={e => update('putts', Number(e.target.value))}
+            placeholder="0" min={0} max={10}
             className="w-20 px-3 py-3 rounded-xl text-golf-text text-center text-xl font-bold focus:outline-none focus:ring-2 focus:ring-golf-green"
             style={{ background: '#223829', border: '1px solid #2a4530', fontSize: '20px' }}
           />
@@ -480,84 +442,44 @@ function StatsCard({ roundPlayer, holeNumber, courseHole, round }: {
         <div className="ml-auto">
           <span
             className="text-sm font-semibold px-3 py-1.5 rounded-full"
-            style={
-              gir
-                ? { background: '#0f4a28', color: '#2d9e5f', border: '1px solid #2d9e5f' }
-                : { background: '#2a3a30', color: '#8aad8f', border: '1px solid #2a4530' }
-            }
+            style={gir
+              ? { background: '#0f4a28', color: '#2d9e5f', border: '1px solid #2d9e5f' }
+              : { background: '#2a3a30', color: '#8aad8f', border: '1px solid #2a4530' }}
           >
             {gir ? 'GIR ✓' : 'No GIR'}
           </span>
         </div>
       </div>
 
-      {/* Par 3: greenHit */}
       {par === 3 && (
-        <ToggleRow
-          label="¿Llegaste al green en el tiro 1?"
-          value={stats.greenHit}
-          onChange={v => update('greenHit', v)}
-        />
+        <ToggleRow label="¿Llegaste al green en el tiro 1?" value={stats.greenHit} onChange={v => update('greenHit', v)} />
       )}
-
-      {/* Par 4/5: fairwayHit */}
       {par !== undefined && par !== 3 && (
-        <ToggleRow
-          label="¿El drive fue al fairway?"
-          value={stats.fairwayHit}
-          onChange={v => update('fairwayHit', v)}
-        />
+        <ToggleRow label="¿El drive fue al fairway?" value={stats.fairwayHit} onChange={v => update('fairwayHit', v)} />
       )}
-
-      {/* Bunker */}
-      <ToggleRow
-        label="¿Fuiste al bunker?"
-        value={stats.inBunker}
-        onChange={v => update('inBunker', v as boolean)}
-        isBool
-      />
-
-      {/* Penalty */}
-      <ToggleRow
-        label="¿Tuviste penalidad?"
-        value={stats.penalty}
-        onChange={v => update('penalty', v as boolean)}
-        isBool
-      />
+      <ToggleRow label="¿Fuiste al bunker?" value={stats.inBunker} onChange={v => update('inBunker', v as boolean)} isBool />
+      <ToggleRow label="¿Tuviste penalidad?" value={stats.penalty} onChange={v => update('penalty', v as boolean)} isBool />
     </div>
   );
 }
 
 function ToggleRow({ label, value, onChange, isBool = false }: {
-  label: string;
-  value: boolean | null;
-  onChange: (v: boolean | null) => void;
-  isBool?: boolean;
+  label: string; value: boolean | null; onChange: (v: boolean | null) => void; isBool?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-golf-muted text-sm flex-1">{label}</span>
       <div className="flex gap-2 flex-shrink-0">
-        <button
-          onClick={() => onChange(true)}
-          className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
-          style={
-            value === true
-              ? { background: '#1a6b3c', color: '#e8f0e9', border: '1px solid #2d9e5f' }
-              : { background: '#223829', color: '#8aad8f', border: '1px solid #2a4530' }
-          }
-        >
+        <button onClick={() => onChange(true)} className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+          style={value === true
+            ? { background: '#1a6b3c', color: '#e8f0e9', border: '1px solid #2d9e5f' }
+            : { background: '#223829', color: '#8aad8f', border: '1px solid #2a4530' }}>
           Sí
         </button>
-        <button
-          onClick={() => onChange(isBool ? false : false)}
-          className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
-          style={
-            value === false
-              ? { background: '#3a1a1a', color: '#fca5a5', border: '1px solid #5a2020' }
-              : { background: '#223829', color: '#8aad8f', border: '1px solid #2a4530' }
-          }
-        >
+        <button onClick={() => onChange(isBool ? false : false)} className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+          style={value === false
+            ? { background: '#3a1a1a', color: '#fca5a5', border: '1px solid #5a2020' }
+            : { background: '#223829', color: '#8aad8f', border: '1px solid #2a4530' }}>
           No
         </button>
       </div>
@@ -568,38 +490,25 @@ function ToggleRow({ label, value, onChange, isBool = false }: {
 // ─── Shots mode ─────────────────────────────────────────────────────────────
 
 function ShotsCard({ roundPlayer, holeNumber, courseHole, round, clubs, shotResults }: {
-  roundPlayer: RoundPlayer;
-  holeNumber: number;
-  courseHole: CourseHole | undefined;
-  round: Round;
-  clubs: { id: string; name: string }[];
-  shotResults: { id: string; name: string }[];
+  roundPlayer: RoundPlayer; holeNumber: number; courseHole: CourseHole | undefined;
+  round: Round; clubs: Club[]; shotResults: ShotResult[];
 }) {
   const [shots, setShots] = useState<Shot[]>([]);
 
-  const refresh = useCallback(() => {
-    setShots(getShotsForHole(round.id, roundPlayer.playerId, holeNumber));
+  const refresh = useCallback(async () => {
+    const data = await getShotsForHole(round.id, roundPlayer.playerId, holeNumber);
+    setShots(data);
   }, [round.id, roundPlayer.playerId, holeNumber]);
 
   useEffect(() => {
-    refresh();
-    // Load existing score display
-    const scores = getHoleScores();
-    const existing = scores.find(s => s.roundId === round.id && s.playerId === roundPlayer.playerId && s.holeNumber === holeNumber);
-    if (!existing) {
-      // Will be auto-synced from shots
-    }
+    void refresh();
   }, [holeNumber, roundPlayer.playerId, round.id, refresh]);
 
   // Auto-save shot count as score
   useEffect(() => {
     if (shots.length > 0) {
-      upsertHoleScore({
-        id: generateId(),
-        roundId: round.id,
-        playerId: roundPlayer.playerId,
-        holeNumber,
-        strokes: shots.length,
+      void upsertHoleScore({
+        roundId: round.id, playerId: roundPlayer.playerId, holeNumber, strokes: shots.length,
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -610,7 +519,7 @@ function ShotsCard({ roundPlayer, holeNumber, courseHole, round, clubs, shotResu
   const isHoleComplete = lastShot?.result === 'Hoyo';
   const totalStrokes = shots.length;
 
-  const addNewShot = () => {
+  const addNewShot = async () => {
     if (isHoleComplete) return;
     let startPosition = 'Tee';
     let autoAddPenalty = false;
@@ -625,43 +534,53 @@ function ShotsCard({ roundPlayer, holeNumber, courseHole, round, clubs, shotResu
     }
 
     const shotNum = shots.length + 1;
-    if (autoAddPenalty) {
-      addShot({
-        id: generateId(), roundId: round.id, playerId: roundPlayer.playerId,
-        holeNumber, shotNumber: shotNum, clubId: '',
-        startPosition: lastShot?.result || '', result: 'Penalidad', yards: 0, isPenalty: true,
-      });
-      addShot({
-        id: generateId(), roundId: round.id, playerId: roundPlayer.playerId,
-        holeNumber, shotNumber: shotNum + 1, clubId: clubs[0]?.id || '',
-        startPosition, result: 'Fairway', yards: 0, isPenalty: false,
-      });
-    } else {
-      addShot({
-        id: generateId(), roundId: round.id, playerId: roundPlayer.playerId,
-        holeNumber, shotNumber: shotNum, clubId: clubs[0]?.id || '',
-        startPosition,
-        result: shots.length === 0 ? 'Fairway' : (lastShot?.result || 'Fairway'),
-        yards: 0, isPenalty: false,
-      });
+    try {
+      if (autoAddPenalty) {
+        await addShot({
+          roundId: round.id, playerId: roundPlayer.playerId, holeNumber,
+          shotNumber: shotNum, clubId: '', startPosition: lastShot?.result || '',
+          result: 'Penalidad', yards: 0, isPenalty: true,
+        });
+        await addShot({
+          roundId: round.id, playerId: roundPlayer.playerId, holeNumber,
+          shotNumber: shotNum + 1, clubId: clubs[0]?.id || '',
+          startPosition, result: 'Fairway', yards: 0, isPenalty: false,
+        });
+      } else {
+        await addShot({
+          roundId: round.id, playerId: roundPlayer.playerId, holeNumber,
+          shotNumber: shotNum, clubId: clubs[0]?.id || '', startPosition,
+          result: shots.length === 0 ? 'Fairway' : (lastShot?.result || 'Fairway'),
+          yards: 0, isPenalty: false,
+        });
+      }
+      await refresh();
+    } catch {
+      toast.error('Error al agregar tiro');
     }
-    refresh();
   };
 
   const updateShotField = (shotId: string, field: keyof Shot, value: string | number | boolean) => {
-    const all = getShots();
-    saveShots(all.map(s => s.id === shotId ? { ...s, [field]: value } : s));
-    refresh();
+    // Optimistic update
+    setShots(prev => prev.map(s => s.id === shotId ? { ...s, [field]: value } : s));
+    void updateShot(shotId, { [field]: value }).catch(() => {
+      toast.error('Error al guardar');
+      void refresh();
+    });
   };
 
-  const removeLastShot = () => {
+  const removeLastShot = async () => {
     if (!lastShot) return;
-    deleteShot(lastShot.id);
-    const prev = shots.slice(0, -1);
-    if (prev.length > 0 && prev[prev.length - 1].isPenalty) {
-      deleteShot(prev[prev.length - 1].id);
+    try {
+      await deleteShot(lastShot.id);
+      const prev = shots.slice(0, -1);
+      if (prev.length > 0 && prev[prev.length - 1].isPenalty) {
+        await deleteShot(prev[prev.length - 1].id);
+      }
+      await refresh();
+    } catch {
+      toast.error('Error al deshacer tiro');
     }
-    refresh();
   };
 
   return (
@@ -683,20 +602,12 @@ function ShotsCard({ roundPlayer, holeNumber, courseHole, round, clubs, shotResu
 
       <div className="flex gap-2 pt-1">
         {!isHoleComplete && (
-          <button
-            onClick={addNewShot}
-            className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-all"
-            style={{ background: '#1a6b3c', color: '#e8f0e9', minHeight: '44px' }}
-          >
+          <button onClick={addNewShot} className="flex-1 py-2.5 rounded-lg text-sm font-medium transition-all" style={{ background: '#1a6b3c', color: '#e8f0e9', minHeight: '44px' }}>
             + Agregar Tiro
           </button>
         )}
         {shots.length > 0 && (
-          <button
-            onClick={removeLastShot}
-            className="px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
-            style={{ background: '#2a3a30', color: '#fca5a5', border: '1px solid #5a2020', minHeight: '44px' }}
-          >
+          <button onClick={removeLastShot} className="px-3 py-2.5 rounded-lg text-sm font-medium transition-all" style={{ background: '#2a3a30', color: '#fca5a5', border: '1px solid #5a2020', minHeight: '44px' }}>
             Deshacer
           </button>
         )}
@@ -713,8 +624,8 @@ function ShotsCard({ roundPlayer, holeNumber, courseHole, round, clubs, shotResu
 
 function ShotRow({ shot, clubs, shotResults, onChange }: {
   shot: Shot;
-  clubs: { id: string; name: string }[];
-  shotResults: { id: string; name: string }[];
+  clubs: Club[];
+  shotResults: ShotResult[];
   onChange: (id: string, field: keyof Shot, value: string | number | boolean) => void;
 }) {
   if (shot.isPenalty) {
@@ -735,38 +646,26 @@ function ShotRow({ shot, clubs, shotResults, onChange }: {
       <div className="grid grid-cols-3 gap-2">
         <div>
           <label className="block text-xs text-golf-muted mb-1">Palo</label>
-          <select
-            value={shot.clubId}
-            onChange={e => onChange(shot.id, 'clubId', e.target.value)}
+          <select value={shot.clubId} onChange={e => onChange(shot.id, 'clubId', e.target.value)}
             className="w-full px-2 py-2 rounded text-golf-text focus:outline-none"
-            style={{ background: '#1a2e20', border: '1px solid #2a4530', fontSize: '16px' }}
-          >
+            style={{ background: '#1a2e20', border: '1px solid #2a4530', fontSize: '16px' }}>
             {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         <div>
           <label className="block text-xs text-golf-muted mb-1">Resultado</label>
-          <select
-            value={shot.result}
-            onChange={e => onChange(shot.id, 'result', e.target.value)}
+          <select value={shot.result} onChange={e => onChange(shot.id, 'result', e.target.value)}
             className="w-full px-2 py-2 rounded text-golf-text focus:outline-none"
-            style={{ background: '#1a2e20', border: '1px solid #2a4530', fontSize: '16px' }}
-          >
+            style={{ background: '#1a2e20', border: '1px solid #2a4530', fontSize: '16px' }}>
             {shotResults.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
           </select>
         </div>
         <div>
           <label className="block text-xs text-golf-muted mb-1">Yardas</label>
-          <input
-            type="number"
-            inputMode="numeric"
-            value={shot.yards || ''}
-            onChange={e => onChange(shot.id, 'yards', Number(e.target.value))}
-            placeholder="0"
-            min={0}
+          <input type="number" inputMode="numeric" value={shot.yards || ''} onChange={e => onChange(shot.id, 'yards', Number(e.target.value))}
+            placeholder="0" min={0}
             className="w-full px-2 py-2 rounded text-golf-text focus:outline-none"
-            style={{ background: '#1a2e20', border: '1px solid #2a4530', fontSize: '16px' }}
-          />
+            style={{ background: '#1a2e20', border: '1px solid #2a4530', fontSize: '16px' }} />
         </div>
       </div>
     </div>
