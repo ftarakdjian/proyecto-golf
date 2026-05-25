@@ -275,7 +275,9 @@ export async function addShot(shot: Omit<Shot, 'id'>): Promise<Shot> {
     .from('shots')
     .insert({
       round_id: shot.roundId, player_id: shot.playerId, hole_number: shot.holeNumber,
-      shot_number: shot.shotNumber, club_id: shot.clubId, start_position: shot.startPosition,
+      shot_number: shot.shotNumber,
+      club_id: shot.clubId || null,  // empty string → null (penalidades no tienen palo)
+      start_position: shot.startPosition,
       result: shot.result, yards: shot.yards, is_penalty: shot.isPenalty,
     })
     .select().single();
@@ -311,7 +313,7 @@ function toShot(r: Record<string, unknown>): Shot {
   return {
     id: r.id as string, roundId: r.round_id as string, playerId: r.player_id as string,
     holeNumber: r.hole_number as number, shotNumber: r.shot_number as number,
-    clubId: r.club_id as string, startPosition: r.start_position as string,
+    clubId: (r.club_id as string) ?? '', startPosition: r.start_position as string,
     result: r.result as string, yards: r.yards as number, isPenalty: r.is_penalty as boolean,
   };
 }

@@ -489,6 +489,12 @@ function ToggleRow({ label, value, onChange, isBool = false }: {
 
 // ─── Shots mode ─────────────────────────────────────────────────────────────
 
+function getDefaultClubId(startPosition: string, clubs: Club[]): string {
+  if (startPosition === 'Green') return clubs.find(c => c.name === 'Putter')?.id ?? clubs[0]?.id ?? '';
+  if (startPosition === 'Bunker') return clubs.find(c => c.name === 'SW')?.id ?? clubs[0]?.id ?? '';
+  return clubs[0]?.id ?? '';
+}
+
 function ShotsCard({ roundPlayer, holeNumber, courseHole, round, clubs, shotResults }: {
   roundPlayer: RoundPlayer; holeNumber: number; courseHole: CourseHole | undefined;
   round: Round; clubs: Club[]; shotResults: ShotResult[];
@@ -536,22 +542,24 @@ function ShotsCard({ roundPlayer, holeNumber, courseHole, round, clubs, shotResu
     const shotNum = shots.length + 1;
     try {
       if (autoAddPenalty) {
+        // Penalidad (sin palo) — se inserta con clubId vacío → null en la DB
         await addShot({
           roundId: round.id, playerId: roundPlayer.playerId, holeNumber,
           shotNumber: shotNum, clubId: '', startPosition: lastShot?.result || '',
           result: 'Penalidad', yards: 0, isPenalty: true,
         });
+        // Tiro siguiente desde Fairway
         await addShot({
           roundId: round.id, playerId: roundPlayer.playerId, holeNumber,
-          shotNumber: shotNum + 1, clubId: clubs[0]?.id || '',
+          shotNumber: shotNum + 1, clubId: getDefaultClubId('Fairway', clubs),
           startPosition, result: 'Fairway', yards: 0, isPenalty: false,
         });
       } else {
+        const defaultResult = shots.length === 0 ? 'Fairway' : (lastShot?.result || 'Fairway');
         await addShot({
           roundId: round.id, playerId: roundPlayer.playerId, holeNumber,
-          shotNumber: shotNum, clubId: clubs[0]?.id || '', startPosition,
-          result: shots.length === 0 ? 'Fairway' : (lastShot?.result || 'Fairway'),
-          yards: 0, isPenalty: false,
+          shotNumber: shotNum, clubId: getDefaultClubId(startPosition, clubs),
+          startPosition, result: defaultResult, yards: 0, isPenalty: false,
         });
       }
       await refresh();
