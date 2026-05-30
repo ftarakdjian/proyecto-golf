@@ -4,14 +4,14 @@ import AppShell from '@/components/AppShell';
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  getRound, getCourses, getPlayers, getRoundPlayersForRound,
+  getRound, getCourses, getRoundPlayersForRound,
   getHoleScoresForRound, getShotsForRound, getHolesForCourse,
   getClubs, removePlayerFromRound,
   getHoleStatsForRound, upsertHoleScore, upsertHoleStats,
   getHoleStatsForPlayer, getShotsForHole,
   addShot, deleteShot, updateShot,
 } from '@/lib/storage';
-import { Round, Course, Player, RoundPlayer, HoleScore, Shot, CourseHole, Club, HoleStats } from '@/lib/types';
+import { Round, Course, RoundPlayer, HoleScore, Shot, CourseHole, Club, HoleStats } from '@/lib/types';
 import { formatDate, resolveHoleNumber, getScoreClass, generateId } from '@/lib/utils';
 import Link from 'next/link';
 import PlayRound from '@/components/PlayRound';
@@ -24,7 +24,6 @@ export default function RoundDetailPage() {
 
   const [round, setRound] = useState<Round | null>(null);
   const [course, setCourse] = useState<Course | null>(null);
-  const [players, setPlayers] = useState<Player[]>([]);
   const [roundPlayers, setRoundPlayers] = useState<RoundPlayer[]>([]);
   const [holeScores, setHoleScores] = useState<HoleScore[]>([]);
   const [holeStats, setHoleStats] = useState<HoleStats[]>([]);
@@ -41,15 +40,14 @@ export default function RoundDetailPage() {
       if (!r) { router.push('/rounds'); return; }
       setRound(r);
 
-      const [courses, allPlayers, rps, scores, stats, roundShots, allClubs] = await Promise.all([
-        getCourses(), getPlayers(), getRoundPlayersForRound(id),
+      const [courses, rps, scores, stats, roundShots, allClubs] = await Promise.all([
+        getCourses(), getRoundPlayersForRound(id),
         getHoleScoresForRound(id), getHoleStatsForRound(id),
         getShotsForRound(id), getClubs(),
       ]);
 
       const c = courses.find(c => c.id === r.courseId) || null;
       setCourse(c);
-      setPlayers(allPlayers);
       setRoundPlayers(rps);
       setHoleScores(scores);
       setHoleStats(stats);
@@ -68,8 +66,6 @@ export default function RoundDetailPage() {
   }, [id, router]);
 
   useEffect(() => { loadData(); }, [loadData, playing]);
-
-  const getPlayerName = (playerId: string) => players.find(p => p.id === playerId)?.name || '?';
 
   if (loading) {
     return (
@@ -90,7 +86,6 @@ export default function RoundDetailPage() {
           round={round}
           roundPlayers={roundPlayers}
           courseHoles={courseHoles}
-          players={players}
           onComplete={() => { setPlaying(false); }}
         />
       </AppShell>
@@ -104,7 +99,6 @@ export default function RoundDetailPage() {
           round={round}
           roundPlayers={roundPlayers}
           courseHoles={courseHoles}
-          players={players}
           clubs={clubs}
           onSave={() => { setEditing(false); loadData(); toast.success('Cambios guardados'); }}
           onCancel={() => setEditing(false)}
@@ -116,7 +110,6 @@ export default function RoundDetailPage() {
   return (
     <AppShell>
       <div className="p-4 md:p-8">
-        {/* Header */}
         <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
           <div>
             <div className="flex items-center gap-2 text-golf-muted text-sm mb-2">
@@ -125,50 +118,28 @@ export default function RoundDetailPage() {
               <span>{course?.name}</span>
             </div>
             <h1 className="text-2xl md:text-3xl font-display text-golf-gold">{course?.name || 'Ronda'}</h1>
-            <p className="text-golf-muted mt-1 text-sm">
-              {formatDate(round.date)} &bull; {round.holesPlayed} hoyos
-            </p>
+            <p className="text-golf-muted mt-1 text-sm">{formatDate(round.date)} &bull; {round.holesPlayed} hoyos</p>
           </div>
           <div className="flex gap-2 flex-wrap">
             {round.status === 'in_progress' && (
-              <button
-                onClick={() => setPlaying(true)}
-                className="px-4 py-2 rounded-lg text-white font-medium text-sm"
-                style={{ background: '#1a6b3c', minHeight: '44px' }}
-              >
+              <button onClick={() => setPlaying(true)} className="px-4 py-2 rounded-lg text-white font-medium text-sm" style={{ background: '#1a6b3c', minHeight: '44px' }}>
                 Continuar →
               </button>
             )}
-            <button
-              onClick={() => setEditing(true)}
-              className="px-4 py-2 rounded-lg font-medium text-sm text-golf-muted"
-              style={{ background: '#223829', border: '1px solid #2a4530', minHeight: '44px' }}
-            >
+            <button onClick={() => setEditing(true)} className="px-4 py-2 rounded-lg font-medium text-sm text-golf-muted" style={{ background: '#223829', border: '1px solid #2a4530', minHeight: '44px' }}>
               ✏️ Editar
             </button>
-            <span
-              className="px-3 py-1 rounded-full text-sm font-medium self-center"
-              style={
-                round.status === 'completed'
-                  ? { background: '#0f4a28', color: '#2d9e5f' }
-                  : { background: '#4a3a0f', color: '#c9a84c' }
-              }
-            >
+            <span className="px-3 py-1 rounded-full text-sm font-medium self-center"
+              style={round.status === 'completed'
+                ? { background: '#0f4a28', color: '#2d9e5f' }
+                : { background: '#4a3a0f', color: '#c9a84c' }}>
               {round.status === 'completed' ? 'Completada' : 'En progreso'}
             </span>
           </div>
         </div>
 
-        {/* Scorecard */}
-        <Scorecard
-          round={round}
-          roundPlayers={roundPlayers}
-          holeScores={holeScores}
-          courseHoles={courseHoles}
-          getPlayerName={getPlayerName}
-        />
+        <Scorecard round={round} roundPlayers={roundPlayers} holeScores={holeScores} courseHoles={courseHoles} />
 
-        {/* Statistics for 'shots' tracking */}
         {roundPlayers.filter(rp => rp.trackingLevel === 'shots').length > 0 && (
           <div className="mt-8">
             <h2 className="text-xl md:text-2xl font-display text-golf-text mb-4">Estadísticas — Tiro a Tiro</h2>
@@ -176,8 +147,8 @@ export default function RoundDetailPage() {
               {roundPlayers.filter(rp => rp.trackingLevel === 'shots').map(rp => (
                 <PlayerShotsStats
                   key={rp.id}
-                  playerName={getPlayerName(rp.playerId)}
-                  shots={shots.filter(s => s.playerId === rp.playerId)}
+                  playerName={rp.username}
+                  shots={shots.filter(s => s.username === rp.username)}
                   courseHoles={courseHoles}
                   round={round}
                   clubs={clubs}
@@ -187,7 +158,6 @@ export default function RoundDetailPage() {
           </div>
         )}
 
-        {/* Statistics for 'stats' tracking */}
         {roundPlayers.filter(rp => rp.trackingLevel === 'stats').length > 0 && (
           <div className="mt-8">
             <h2 className="text-xl md:text-2xl font-display text-golf-text mb-4">Estadísticas — Stats por Hoyo</h2>
@@ -195,8 +165,8 @@ export default function RoundDetailPage() {
               {roundPlayers.filter(rp => rp.trackingLevel === 'stats').map(rp => (
                 <PlayerHoleStatsView
                   key={rp.id}
-                  playerName={getPlayerName(rp.playerId)}
-                  statsData={holeStats.filter(s => s.playerId === rp.playerId)}
+                  playerName={rp.username}
+                  statsData={holeStats.filter(s => s.username === rp.username)}
                   courseHoles={courseHoles}
                   round={round}
                 />
@@ -211,12 +181,8 @@ export default function RoundDetailPage() {
 
 // ─── Scorecard ─────────────────────────────────────────────────────────────
 
-function Scorecard({ round, roundPlayers, holeScores, courseHoles, getPlayerName }: {
-  round: Round;
-  roundPlayers: RoundPlayer[];
-  holeScores: HoleScore[];
-  courseHoles: CourseHole[];
-  getPlayerName: (id: string) => string;
+function Scorecard({ round, roundPlayers, holeScores, courseHoles }: {
+  round: Round; roundPlayers: RoundPlayer[]; holeScores: HoleScore[]; courseHoles: CourseHole[];
 }) {
   const totalHoles = round.holesPlayed;
   const courseHoleCount = courseHoles.length;
@@ -227,13 +193,13 @@ function Scorecard({ round, roundPlayers, holeScores, courseHoles, getPlayerName
     return courseHoles.find(h => h.holeNumber === n);
   };
 
-  const getScore = (playerId: string, hole: number) =>
-    holeScores.find(s => s.playerId === playerId && s.holeNumber === hole)?.strokes;
+  const getScore = (username: string, hole: number) =>
+    holeScores.find(s => s.username === username && s.holeNumber === hole)?.strokes;
 
-  const getTotalScore = (playerId: string, from: number, to: number) => {
+  const getTotalScore = (username: string, from: number, to: number) => {
     let t = 0;
     for (let h = from; h <= Math.min(to, totalHoles); h++) {
-      const s = getScore(playerId, h);
+      const s = getScore(username, h);
       if (s !== undefined) t += s;
     }
     return t;
@@ -261,16 +227,14 @@ function Scorecard({ round, roundPlayers, holeScores, courseHoles, getPlayerName
     const ch = getCourseHole(hole);
     return (
       <tr key={hole} style={{ borderTop: '1px solid #2a4530' }}>
-        <td className="px-3 py-2 text-golf-gold font-bold text-sm whitespace-nowrap" style={{ background: '#1a2e20', position: 'sticky', left: 0, zIndex: 1 }}>
-          {hole}
-        </td>
+        <td className="px-3 py-2 text-golf-gold font-bold text-sm whitespace-nowrap" style={{ background: '#1a2e20', position: 'sticky', left: 0, zIndex: 1 }}>{hole}</td>
         <td className="px-3 py-2 text-golf-text text-sm font-medium">{ch?.par ?? '—'}</td>
         <td className="px-3 py-2 text-golf-muted text-sm">{ch?.yards ? `${ch.yards}` : '—'}</td>
         {roundPlayers.map(rp => {
-          const score = getScore(rp.playerId, hole);
+          const score = getScore(rp.username, hole);
           const par = ch?.par;
           return (
-            <td key={rp.playerId} className="px-2 py-2 text-center">
+            <td key={rp.id} className="px-2 py-2 text-center">
               {score !== undefined && par !== undefined ? (
                 <span className={getScoreClass(score, par)}>{score}</span>
               ) : score !== undefined ? (
@@ -290,16 +254,14 @@ function Scorecard({ round, roundPlayers, holeScores, courseHoles, getPlayerName
     const yards = getTotalYards(from, to);
     return (
       <tr key={label} style={{ background: '#223829', borderTop: '2px solid #2a4530' }}>
-        <td className="px-3 py-2 text-golf-gold font-bold text-sm whitespace-nowrap" style={{ position: 'sticky', left: 0, zIndex: 1, background: '#223829' }}>
-          {label}
-        </td>
+        <td className="px-3 py-2 text-golf-gold font-bold text-sm whitespace-nowrap" style={{ position: 'sticky', left: 0, zIndex: 1, background: '#223829' }}>{label}</td>
         <td className="px-3 py-2 text-golf-text font-semibold text-sm">{par || '—'}</td>
         <td className="px-3 py-2 text-golf-muted text-sm">{yards > 0 ? yards : '—'}</td>
         {roundPlayers.map(rp => {
-          const total = getTotalScore(rp.playerId, from, to);
+          const total = getTotalScore(rp.username, from, to);
           const diff = par ? total - par : 0;
           return (
-            <td key={rp.playerId} className="px-2 py-2 text-center">
+            <td key={rp.id} className="px-2 py-2 text-center">
               {total > 0 ? (
                 <>
                   <span className="text-golf-text font-bold text-sm">{total}</span>
@@ -309,9 +271,7 @@ function Scorecard({ round, roundPlayers, holeScores, courseHoles, getPlayerName
                     </span>
                   )}
                 </>
-              ) : (
-                <span className="text-golf-muted text-sm">—</span>
-              )}
+              ) : <span className="text-golf-muted text-sm">—</span>}
             </td>
           );
         })}
@@ -326,15 +286,11 @@ function Scorecard({ round, roundPlayers, holeScores, courseHoles, getPlayerName
         <table className="w-full text-sm" style={{ minWidth: '400px' }}>
           <thead>
             <tr style={{ background: '#223829' }}>
-              <th className="text-left px-3 py-3 text-golf-muted font-medium whitespace-nowrap" style={{ position: 'sticky', left: 0, zIndex: 2, background: '#223829' }}>
-                Hoyo
-              </th>
+              <th className="text-left px-3 py-3 text-golf-muted font-medium whitespace-nowrap" style={{ position: 'sticky', left: 0, zIndex: 2, background: '#223829' }}>Hoyo</th>
               <th className="text-left px-3 py-3 text-golf-muted font-medium">Par</th>
               <th className="text-left px-3 py-3 text-golf-muted font-medium">Yd</th>
               {roundPlayers.map(rp => (
-                <th key={rp.id} className="px-2 py-3 text-golf-gold font-medium text-center whitespace-nowrap">
-                  {getPlayerName(rp.playerId)}
-                </th>
+                <th key={rp.id} className="px-2 py-3 text-golf-gold font-medium text-center whitespace-nowrap">{rp.username}</th>
               ))}
             </tr>
           </thead>
@@ -366,16 +322,13 @@ function Scorecard({ round, roundPlayers, holeScores, courseHoles, getPlayerName
   );
 }
 
-// ─── Player Stats (shots tracking) ─────────────────────────────────────────
+// ─── Stats views ─────────────────────────────────────────────────────────────
 
 function PlayerShotsStats({ playerName, shots, courseHoles, round, clubs }: {
   playerName: string; shots: Shot[]; courseHoles: CourseHole[]; round: Round; clubs: Club[];
 }) {
   const courseHoleCount = courseHoles.length;
-  const getCH = (h: number) => {
-    if (!courseHoleCount) return undefined;
-    return courseHoles.find(ch => ch.holeNumber === resolveHoleNumber(h, courseHoleCount));
-  };
+  const getCH = (h: number) => !courseHoleCount ? undefined : courseHoles.find(ch => ch.holeNumber === resolveHoleNumber(h, courseHoleCount));
 
   const nonPenaltyByHole = new Map<number, Shot[]>();
   shots.filter(s => !s.isPenalty).forEach(s => {
@@ -384,41 +337,22 @@ function PlayerShotsStats({ playerName, shots, courseHoles, round, clubs }: {
   });
 
   const totalH = round.holesPlayed;
-  const par45 = Array.from({ length: totalH }, (_, i) => i + 1).filter(h => {
-    const ch = getCH(h); return ch && (ch.par === 4 || ch.par === 5);
-  });
-
-  const fairwaysHit = par45.filter(h => {
-    const hs = nonPenaltyByHole.get(h) || [];
-    return hs.find(s => s.shotNumber === 1)?.result === 'Fairway';
-  }).length;
-
-  const driveDists = par45
-    .map(h => (nonPenaltyByHole.get(h) || []).find(s => s.shotNumber === 1)?.yards || 0)
-    .filter(y => y > 0);
+  const par45 = Array.from({ length: totalH }, (_, i) => i + 1).filter(h => { const ch = getCH(h); return ch && (ch.par === 4 || ch.par === 5); });
+  const fairwaysHit = par45.filter(h => (nonPenaltyByHole.get(h) || []).find(s => s.shotNumber === 1)?.result === 'Fairway').length;
+  const driveDists = par45.map(h => (nonPenaltyByHole.get(h) || []).find(s => s.shotNumber === 1)?.yards || 0).filter(y => y > 0);
   const avgDrive = driveDists.length > 0 ? Math.round(driveDists.reduce((a, b) => a + b, 0) / driveDists.length) : 0;
-
   const girHoles = Array.from({ length: totalH }, (_, i) => i + 1).filter(h => {
-    const ch = getCH(h);
-    if (!ch) return false;
+    const ch = getCH(h); if (!ch) return false;
     const hs = nonPenaltyByHole.get(h) || [];
     const reg = ch.par - 2;
-    for (let i = 1; i <= reg; i++) {
-      const shot = hs.find(s => s.shotNumber === i);
-      if (shot && (shot.result === 'Green' || shot.result === 'Hoyo')) return true;
-    }
+    for (let i = 1; i <= reg; i++) { const shot = hs.find(s => s.shotNumber === i); if (shot && (shot.result === 'Green' || shot.result === 'Hoyo')) return true; }
     return false;
   });
-
   const putterClub = clubs.find(c => c.name === 'Putter');
   const puttShots = shots.filter(s => !s.isPenalty && putterClub && s.clubId === putterClub.id);
-  const totalPutts = puttShots.length;
   const puttsByH = new Map<number, number>();
   puttShots.forEach(s => puttsByH.set(s.holeNumber, (puttsByH.get(s.holeNumber) || 0) + 1));
   const pv = Array.from(puttsByH.values());
-  const one = pv.filter(v => v === 1).length;
-  const two = pv.filter(v => v === 2).length;
-  const threePlus = pv.filter(v => v >= 3).length;
   const totalPenalties = shots.filter(s => s.isPenalty || s.result === 'Agua' || s.result === 'Fuera de límites').length;
 
   return (
@@ -434,10 +368,10 @@ function PlayerShotsStats({ playerName, shots, courseHoles, round, clubs }: {
           <StatItem label="%" value={totalH > 0 ? `${Math.round((girHoles.length / totalH) * 100)}%` : '—'} />
         </StatBlock>
         <StatBlock title="⛳ Putting">
-          <StatItem label="Total putts" value={String(totalPutts)} />
-          <StatItem label="1 putt" value={String(one)} />
-          <StatItem label="2 putts" value={String(two)} />
-          <StatItem label="3+ putts" value={String(threePlus)} />
+          <StatItem label="Total putts" value={String(puttShots.length)} />
+          <StatItem label="1 putt" value={String(pv.filter(v => v === 1).length)} />
+          <StatItem label="2 putts" value={String(pv.filter(v => v === 2).length)} />
+          <StatItem label="3+ putts" value={String(pv.filter(v => v >= 3).length)} />
         </StatBlock>
         <StatBlock title="⚠️ Penalidades">
           <StatItem label="Total" value={String(totalPenalties)} />
@@ -452,22 +386,12 @@ function PlayerHoleStatsView({ playerName, statsData, courseHoles, round }: {
 }) {
   const totalH = round.holesPlayed;
   const courseHoleCount = courseHoles.length;
-  const getCH = (h: number) => {
-    if (!courseHoleCount) return undefined;
-    return courseHoles.find(ch => ch.holeNumber === resolveHoleNumber(h, courseHoleCount));
-  };
-  const par45 = Array.from({ length: totalH }, (_, i) => i + 1).filter(h => {
-    const ch = getCH(h); return ch && (ch.par === 4 || ch.par === 5);
-  });
+  const getCH = (h: number) => !courseHoleCount ? undefined : courseHoles.find(ch => ch.holeNumber === resolveHoleNumber(h, courseHoleCount));
+  const par45 = Array.from({ length: totalH }, (_, i) => i + 1).filter(h => { const ch = getCH(h); return ch && (ch.par === 4 || ch.par === 5); });
   const fairwaysHit = par45.filter(h => statsData.find(s => s.holeNumber === h)?.fairwayHit === true).length;
   const girCount = statsData.filter(s => s.gir).length;
   const totalPutts = statsData.reduce((acc, s) => acc + (s.putts || 0), 0);
   const avgPutts = statsData.length > 0 ? (totalPutts / statsData.length).toFixed(1) : '—';
-  const bunkerHoles = statsData.filter(s => s.inBunker).length;
-  const penaltyHoles = statsData.filter(s => s.penalty).length;
-  const onePutt = statsData.filter(s => s.putts === 1).length;
-  const twoPutt = statsData.filter(s => s.putts === 2).length;
-  const threePlusPutt = statsData.filter(s => s.putts >= 3).length;
 
   return (
     <div className="rounded-xl p-5" style={{ background: '#1a2e20', border: '1px solid #2a4530' }}>
@@ -483,13 +407,13 @@ function PlayerHoleStatsView({ playerName, statsData, courseHoles, round }: {
         <StatBlock title="⛳ Putting">
           <StatItem label="Total putts" value={String(totalPutts)} />
           <StatItem label="Promedio" value={String(avgPutts)} />
-          <StatItem label="1 putt" value={String(onePutt)} />
-          <StatItem label="2 putts" value={String(twoPutt)} />
-          <StatItem label="3+ putts" value={String(threePlusPutt)} />
+          <StatItem label="1 putt" value={String(statsData.filter(s => s.putts === 1).length)} />
+          <StatItem label="2 putts" value={String(statsData.filter(s => s.putts === 2).length)} />
+          <StatItem label="3+ putts" value={String(statsData.filter(s => s.putts >= 3).length)} />
         </StatBlock>
         <StatBlock title="📊 Otros">
-          <StatItem label="Hoyos en bunker" value={String(bunkerHoles)} />
-          <StatItem label="Penalidades" value={String(penaltyHoles)} />
+          <StatItem label="Hoyos en bunker" value={String(statsData.filter(s => s.inBunker).length)} />
+          <StatItem label="Penalidades" value={String(statsData.filter(s => s.penalty).length)} />
         </StatBlock>
       </div>
     </div>
@@ -516,29 +440,25 @@ function StatItem({ label, value }: { label: string; value: string }) {
 
 // ─── Edit Round ─────────────────────────────────────────────────────────────
 
-function EditRound({ round, roundPlayers, courseHoles, players, clubs, onSave, onCancel }: {
+function EditRound({ round, roundPlayers, courseHoles, clubs, onSave, onCancel }: {
   round: Round; roundPlayers: RoundPlayer[]; courseHoles: CourseHole[];
-  players: Player[]; clubs: Club[]; onSave: () => void; onCancel: () => void;
+  clubs: Club[]; onSave: () => void; onCancel: () => void;
 }) {
-  const [selectedPlayer, setSelectedPlayer] = useState(roundPlayers[0]?.playerId || '');
+  const [selectedUsername, setSelectedUsername] = useState(roundPlayers[0]?.username || '');
   const [localRoundPlayers, setLocalRoundPlayers] = useState(roundPlayers);
   const [shotResults] = useState(['Fairway', 'Green', 'Rough', 'Bunker', 'Hoyo', 'Agua', 'Fuera de límites']);
 
   const courseHoleCount = courseHoles.length;
-  const getCH = (h: number) => {
-    if (!courseHoleCount) return undefined;
-    return courseHoles.find(ch => ch.holeNumber === resolveHoleNumber(h, courseHoleCount));
-  };
-  const getPlayerName = (id: string) => players.find(p => p.id === id)?.name || '?';
-  const selectedRP = localRoundPlayers.find(rp => rp.playerId === selectedPlayer);
+  const getCH = (h: number) => !courseHoleCount ? undefined : courseHoles.find(ch => ch.holeNumber === resolveHoleNumber(h, courseHoleCount));
+  const selectedRP = localRoundPlayers.find(rp => rp.username === selectedUsername);
 
-  const handleRemovePlayer = async (playerId: string) => {
-    if (!confirm(`¿Eliminar a ${getPlayerName(playerId)} de esta ronda?`)) return;
+  const handleRemovePlayer = async (username: string) => {
+    if (!confirm(`¿Eliminar a ${username} de esta ronda?`)) return;
     try {
-      await removePlayerFromRound(round.id, playerId);
-      const updated = localRoundPlayers.filter(rp => rp.playerId !== playerId);
+      await removePlayerFromRound(round.id, username);
+      const updated = localRoundPlayers.filter(rp => rp.username !== username);
       setLocalRoundPlayers(updated);
-      if (selectedPlayer === playerId) setSelectedPlayer(updated[0]?.playerId || '');
+      if (selectedUsername === username) setSelectedUsername(updated[0]?.username || '');
       toast.success('Jugador eliminado');
     } catch {
       toast.error('Error al eliminar jugador');
@@ -550,18 +470,12 @@ function EditRound({ round, roundPlayers, courseHoles, players, clubs, onSave, o
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h1 className="text-2xl font-display text-golf-gold">Editando Ronda</h1>
         <div className="flex gap-2">
-          <button onClick={onSave} className="px-4 py-2 rounded-lg text-white font-medium text-sm" style={{ background: '#1a6b3c', minHeight: '44px' }}>
-            ✓ Guardar
-          </button>
-          <button onClick={onCancel} className="px-4 py-2 rounded-lg font-medium text-sm text-golf-muted" style={{ background: '#223829', border: '1px solid #2a4530', minHeight: '44px' }}>
-            Cancelar
-          </button>
+          <button onClick={onSave} className="px-4 py-2 rounded-lg text-white font-medium text-sm" style={{ background: '#1a6b3c', minHeight: '44px' }}>✓ Guardar</button>
+          <button onClick={onCancel} className="px-4 py-2 rounded-lg font-medium text-sm text-golf-muted" style={{ background: '#223829', border: '1px solid #2a4530', minHeight: '44px' }}>Cancelar</button>
         </div>
       </div>
 
-      {localRoundPlayers.length === 0 && (
-        <p className="text-golf-muted">No hay jugadores en esta ronda.</p>
-      )}
+      {localRoundPlayers.length === 0 && <p className="text-golf-muted">No hay jugadores en esta ronda.</p>}
 
       {localRoundPlayers.length > 0 && (
         <>
@@ -569,22 +483,19 @@ function EditRound({ round, roundPlayers, courseHoles, players, clubs, onSave, o
             {localRoundPlayers.map(rp => (
               <div key={rp.id} className="flex items-center gap-1">
                 <button
-                  onClick={() => setSelectedPlayer(rp.playerId)}
+                  onClick={() => setSelectedUsername(rp.username)}
                   className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
-                  style={selectedPlayer === rp.playerId
+                  style={selectedUsername === rp.username
                     ? { background: '#1a6b3c', color: '#e8f0e9', minHeight: '44px' }
-                    : { background: '#1a2e20', color: '#8aad8f', border: '1px solid #2a4530', minHeight: '44px' }}
-                >
-                  {getPlayerName(rp.playerId)}
+                    : { background: '#1a2e20', color: '#8aad8f', border: '1px solid #2a4530', minHeight: '44px' }}>
+                  {rp.username}
                 </button>
                 <button
-                  onClick={() => handleRemovePlayer(rp.playerId)}
+                  onClick={() => handleRemovePlayer(rp.username)}
                   className="w-8 h-8 flex items-center justify-center rounded-full text-red-400 hover:text-red-300 text-xs"
                   style={{ background: '#2a2020', minHeight: '44px', minWidth: '44px' }}
                   title="Eliminar jugador"
-                >
-                  ✕
-                </button>
+                >✕</button>
               </div>
             ))}
           </div>
@@ -592,7 +503,7 @@ function EditRound({ round, roundPlayers, courseHoles, players, clubs, onSave, o
           {selectedRP && (
             <div className="space-y-3">
               <h2 className="text-base font-display text-golf-text">
-                {getPlayerName(selectedPlayer)} —{' '}
+                {selectedUsername} —{' '}
                 <span className="text-golf-muted text-sm">
                   {selectedRP.trackingLevel === 'shots' ? 'Tiro a Tiro' : selectedRP.trackingLevel === 'stats' ? 'Stats por Hoyo' : 'Solo Score'}
                 </span>
@@ -607,15 +518,9 @@ function EditRound({ round, roundPlayers, courseHoles, players, clubs, onSave, o
                       {ch && <span className="text-golf-muted text-sm">Par {ch.par} • {ch.yards}yd</span>}
                     </div>
                     <div style={{ background: '#182820', borderRadius: '0 0 0.75rem 0.75rem' }}>
-                      {selectedRP.trackingLevel === 'score' && (
-                        <EditScoreHole roundId={round.id} playerId={selectedPlayer} holeNumber={hole} />
-                      )}
-                      {selectedRP.trackingLevel === 'stats' && (
-                        <EditStatsHole roundId={round.id} playerId={selectedPlayer} holeNumber={hole} courseHole={ch} />
-                      )}
-                      {selectedRP.trackingLevel === 'shots' && (
-                        <EditShotsHole roundId={round.id} playerId={selectedPlayer} holeNumber={hole} clubs={clubs} shotResults={shotResults} />
-                      )}
+                      {selectedRP.trackingLevel === 'score' && <EditScoreHole roundId={round.id} username={selectedUsername} holeNumber={hole} />}
+                      {selectedRP.trackingLevel === 'stats' && <EditStatsHole roundId={round.id} username={selectedUsername} holeNumber={hole} courseHole={ch} />}
+                      {selectedRP.trackingLevel === 'shots' && <EditShotsHole roundId={round.id} username={selectedUsername} holeNumber={hole} clubs={clubs} shotResults={shotResults} />}
                     </div>
                   </div>
                 );
@@ -628,52 +533,44 @@ function EditRound({ round, roundPlayers, courseHoles, players, clubs, onSave, o
   );
 }
 
-function EditScoreHole({ roundId, playerId, holeNumber }: { roundId: string; playerId: string; holeNumber: number }) {
+function EditScoreHole({ roundId, username, holeNumber }: { roundId: string; username: string; holeNumber: number }) {
   const [val, setVal] = useState('');
 
   useEffect(() => {
     getHoleScoresForRound(roundId).then(scores => {
-      const s = scores.find(s => s.playerId === playerId && s.holeNumber === holeNumber);
+      const s = scores.find(s => s.username === username && s.holeNumber === holeNumber);
       setVal(s ? String(s.strokes) : '');
     }).catch(() => {});
-  }, [roundId, playerId, holeNumber]);
+  }, [roundId, username, holeNumber]);
 
   const save = (v: string) => {
     const n = parseInt(v);
-    if (!isNaN(n) && n > 0) void upsertHoleScore({ roundId, playerId, holeNumber, strokes: n });
+    if (!isNaN(n) && n > 0) void upsertHoleScore({ roundId, username, holeNumber, strokes: n });
   };
 
   return (
     <div className="px-4 py-3 flex items-center gap-3">
       <label className="text-golf-muted text-sm">Golpes:</label>
-      <input
-        type="number"
-        inputMode="numeric"
-        value={val}
-        onChange={e => setVal(e.target.value)}
-        onBlur={e => save(e.target.value)}
-        min={1}
-        max={20}
-        placeholder="0"
+      <input type="number" inputMode="numeric" value={val} onChange={e => setVal(e.target.value)} onBlur={e => save(e.target.value)}
+        min={1} max={20} placeholder="0"
         className="w-20 px-3 py-2 rounded-lg text-golf-text text-center text-xl font-bold focus:outline-none"
-        style={{ background: '#223829', border: '1px solid #2a4530', fontSize: '20px' }}
-      />
+        style={{ background: '#223829', border: '1px solid #2a4530', fontSize: '20px' }} />
     </div>
   );
 }
 
-function EditStatsHole({ roundId, playerId, holeNumber, courseHole }: {
-  roundId: string; playerId: string; holeNumber: number; courseHole: CourseHole | undefined;
+function EditStatsHole({ roundId, username, holeNumber, courseHole }: {
+  roundId: string; username: string; holeNumber: number; courseHole: CourseHole | undefined;
 }) {
-  const def: HoleStats = { id: generateId(), roundId, playerId, holeNumber, strokes: 0, fairwayHit: null, greenHit: null, inBunker: false, penalty: false, putts: 0, gir: false };
+  const def: HoleStats = { id: generateId(), roundId, username, holeNumber, strokes: 0, fairwayHit: null, greenHit: null, inBunker: false, penalty: false, putts: 0, gir: false };
   const [s, setS] = useState<HoleStats>(def);
 
   useEffect(() => {
-    getHoleStatsForPlayer(roundId, playerId, holeNumber).then(ex => {
+    getHoleStatsForPlayer(roundId, username, holeNumber).then(ex => {
       setS(ex || { ...def, id: generateId() });
     }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roundId, playerId, holeNumber]);
+  }, [roundId, username, holeNumber]);
 
   const upd = (field: keyof HoleStats, value: boolean | number | null) => {
     setS(prev => {
@@ -686,7 +583,7 @@ function EditStatsHole({ roundId, playerId, holeNumber, courseHole }: {
         return (next.strokes - next.putts) <= 3;
       })();
       void upsertHoleStats(next);
-      if (next.strokes > 0) void upsertHoleScore({ roundId, playerId, holeNumber, strokes: next.strokes });
+      if (next.strokes > 0) void upsertHoleScore({ roundId, username, holeNumber, strokes: next.strokes });
       return next;
     });
   };
@@ -728,28 +625,23 @@ function EditToggle({ label, value, onChange, isBool = false }: {
       <span className="text-golf-muted text-sm">{label}</span>
       <div className="flex gap-1">
         <button onClick={() => onChange(true)} className="px-3 py-1 rounded text-sm"
-          style={value === true ? { background: '#1a6b3c', color: '#e8f0e9' } : { background: '#223829', color: '#8aad8f', border: '1px solid #2a4530' }}>
-          Sí
-        </button>
+          style={value === true ? { background: '#1a6b3c', color: '#e8f0e9' } : { background: '#223829', color: '#8aad8f', border: '1px solid #2a4530' }}>Sí</button>
         <button onClick={() => onChange(isBool ? false : false)} className="px-3 py-1 rounded text-sm"
-          style={value === false ? { background: '#3a1a1a', color: '#fca5a5' } : { background: '#223829', color: '#8aad8f', border: '1px solid #2a4530' }}>
-          No
-        </button>
+          style={value === false ? { background: '#3a1a1a', color: '#fca5a5' } : { background: '#223829', color: '#8aad8f', border: '1px solid #2a4530' }}>No</button>
       </div>
     </div>
   );
 }
 
-function EditShotsHole({ roundId, playerId, holeNumber, clubs, shotResults }: {
-  roundId: string; playerId: string; holeNumber: number;
-  clubs: Club[]; shotResults: string[];
+function EditShotsHole({ roundId, username, holeNumber, clubs, shotResults }: {
+  roundId: string; username: string; holeNumber: number; clubs: Club[]; shotResults: string[];
 }) {
   const [shots, setShots] = useState<Shot[]>([]);
 
   const refresh = useCallback(async () => {
-    const data = await getShotsForHole(roundId, playerId, holeNumber);
+    const data = await getShotsForHole(roundId, username, holeNumber);
     setShots(data);
-  }, [roundId, playerId, holeNumber]);
+  }, [roundId, username, holeNumber]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -761,26 +653,17 @@ function EditShotsHole({ roundId, playerId, holeNumber, clubs, shotResults }: {
     const startPos = shots.length === 0 ? 'Tee' : (lastShot?.result || 'Fairway');
     try {
       await addShot({
-        roundId, playerId, holeNumber,
-        shotNumber: shots.length + 1,
-        clubId: clubs[0]?.id || '',
-        startPosition: startPos,
-        result: 'Fairway',
-        yards: 0, isPenalty: false,
+        roundId, username, holeNumber,
+        shotNumber: shots.length + 1, clubId: clubs[0]?.id || '',
+        startPosition: startPos, result: 'Fairway', yards: 0, isPenalty: false,
       });
       await refresh();
-    } catch {
-      toast.error('Error al agregar tiro');
-    }
+    } catch { toast.error('Error al agregar tiro'); }
   };
 
   const removeShot = async (id: string) => {
-    try {
-      await deleteShot(id);
-      await refresh();
-    } catch {
-      toast.error('Error al eliminar tiro');
-    }
+    try { await deleteShot(id); await refresh(); }
+    catch { toast.error('Error al eliminar tiro'); }
   };
 
   const updateShotField = (shotId: string, field: keyof Shot, value: string | number) => {
@@ -792,9 +675,7 @@ function EditShotsHole({ roundId, playerId, holeNumber, clubs, shotResults }: {
       {shots.map(shot => (
         <div key={shot.id} className="rounded-lg p-3" style={{ background: '#223829', border: '1px solid #2a4530' }}>
           <div className="flex items-center justify-between mb-2">
-            <span className="text-golf-gold text-xs font-semibold">
-              {shot.isPenalty ? '⚠ Penalidad' : `Tiro ${shot.shotNumber}`}
-            </span>
+            <span className="text-golf-gold text-xs font-semibold">{shot.isPenalty ? '⚠ Penalidad' : `Tiro ${shot.shotNumber}`}</span>
             <button onClick={() => removeShot(shot.id)} className="text-red-400 text-xs hover:text-red-300">✕</button>
           </div>
           {!shot.isPenalty && (

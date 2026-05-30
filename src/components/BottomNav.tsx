@@ -2,16 +2,21 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useUser } from '@/lib/user-context';
 
-const navItems = [
+const NAV_ITEMS = [
   { href: '/dashboard', label: 'Stats', icon: '📊' },
   { href: '/rounds/new', label: 'Nueva', icon: '➕' },
   { href: '/rounds', label: 'Rondas', icon: '🏌️' },
-  { href: '/admin', label: 'Admin', icon: '⚙️' },
 ];
+
+const ADMIN_ITEM = { href: '/admin', label: 'Admin', icon: '⚙️' };
 
 export default function BottomNav() {
   const pathname = usePathname();
+  const { role } = useUser();
+
+  const items = role === 'admin' ? [...NAV_ITEMS, ADMIN_ITEM] : NAV_ITEMS;
 
   const isActive = (href: string) => {
     if (href === '/rounds/new') return pathname === '/rounds/new';
@@ -23,14 +28,10 @@ export default function BottomNav() {
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-20 md:hidden"
-      style={{
-        background: '#1a2e20',
-        borderTop: '1px solid #2a4530',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}
+      style={{ background: '#1a2e20', borderTop: '1px solid #2a4530', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <div className="flex items-center justify-around" style={{ height: '60px' }}>
-        {navItems.map(item => {
+        {items.map(item => {
           const active = isActive(item.href);
           return (
             <Link

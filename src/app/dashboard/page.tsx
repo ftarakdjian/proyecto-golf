@@ -1,205 +1,326 @@
 'use client';
 
 import AppShell from '@/components/AppShell';
-import { useEffect, useState } from 'react';
-import { getRounds, getPlayers, getCourses } from '@/lib/storage';
-import { Round, Player, Course } from '@/lib/types';
-import { formatDate } from '@/lib/utils';
+import { useEffect, useState, useMemo } from 'react';
+import { getUserRoundData, UserRoundData } from '@/lib/storage';
+import { useUser } from '@/lib/user-context';
+import { Course, CourseHole } from '@/lib/types';
+import { formatDate, resolveHoleNumber } from '@/lib/utils';
 import Link from 'next/link';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import {
+  ResponsiveContainer, LineChart, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip,
+} from 'recharts';
 
 export default function DashboardPage() {
-  const [rounds, setRounds] = useState<Round[]>([]);
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  async function loadData() {
-    try {
-      setLoading(true);
-      setError(null);
-      const [r, p, c] = await Promise.all([getRounds(), getPlayers(), getCourses()]);
-      setRounds(r);
-      setPlayers(p);
-      setCourses(c);
-    } catch {
-      setError('Error al cargar datos');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => { loadData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const completedRounds = rounds.filter(r => r.status === 'completed');
-  const inProgressRounds = rounds.filter(r => r.status === 'in_progress');
-  const recentRounds = [...rounds].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
-
-  const getCourse = (id: string) => courses.find(c => c.id === id);
-
   return (
     <AppShell>
-      <div className="p-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-display text-golf-gold">Dashboard</h1>
-          <p className="text-golf-muted mt-1">Bienvenido al sistema de seguimiento de golf</p>
+      <DashboardContent />
+    </AppShell>
+  );
+}
+
+function DashboardContent() {
+  const { username } = useUser();
+  const [data, setData] = useState<UserRoundData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [courseFilter, setCourseFilter] = useState<string>('all');
+
+  useEffect(() => {
+    getUserRoundData(username)
+      .then(setData)
+      .catch(() => setError('Error al cargar estadísticas'))
+      .finally(() => setLoading(false));
+  }, [username]);
+
+  const completedRounds = useMemo(
+    () => (data?.rounds ?? []).filter(r => r.status === 'completed'),
+    [data]
+  );
+
+  const filteredRounds = useMemo(() => {
+    if (courseFilter === 'all') return completedRounds;
+    return completedRounds.filter(r => r.courseId === courseFilter);
+  }, [completedRounds, courseFilter]);
+
+  const getCourse = (id: string): Course | undefined =>
+    data?.courses.find(c => c.id === id);
+
+  const getHoles = (courseId: string): CourseHole[] =>
+    (data?.courseHoles ?? []).filter(h => h.courseId === courseId);
+
+  // ─── Per-round stats ──────────────────────────────────────────
+  const roundStats = useMemo(() => {
+    return filteredRounds.map(round => {
+      const scores = (data?.holeScores ?? []).filter(
+        s => s.roundId === round.id && s.username === username
+      );
+      const stats = (data?.holeStats ?? []).filter(
+        s => s.roundId === round.id && s.username === username
+      );
+      const holes = getHoles(round.courseId);
+      const courseHoleCount = holes.length;
+
+      const totalScore = scores.reduce((acc, s) => acc + s.strokes, 0);
+
+      let parTotal = 0;
+      for (let h = 1; h <= round.holesPlayed; h++) {
+        if (!courseHoleCount) break;
+        const ch = holes.find(x => x.holeNumber === resolveHoleNumber(h, courseHoleCount));
+        if (ch) parTotal += ch.par;
+      }
+
+      const par45Holes = Array.from({ length: round.holesPlayed }, (_, i) => i + 1).filter(h => {
+        if (!courseHoleCount) return false;
+        const ch = holes.find(x => x.holeNumber === resolveHoleNumber(h, courseHoleCount));
+        return ch && (ch.par === 4 || ch.par === 5);
+      });
+
+      const fairwaysHit = stats.filter(s => s.fairwayHit === true).length;
+      const girCount = stats.filter(s => s.gir).length;
+      const totalPutts = stats.reduce((acc, s) => acc + (s.putts || 0), 0);
+      const penaltyCount = stats.filter(s => s.penalty).length;
+
+      return {
+        round,
+        totalScore,
+        parTotal,
+        differential: parTotal > 0 ? totalScore - parTotal : null,
+        fairwaysPct: par45Holes.length > 0 ? (fairwaysHit / par45Holes.length) * 100 : null,
+        girPct: stats.length > 0 ? (girCount / stats.length) * 100 : null,
+        avgPutts: stats.length > 0 ? totalPutts / stats.length : null,
+        penalties: penaltyCount,
+        hasStats: stats.length > 0,
+      };
+    });
+  }, [filteredRounds, data, username]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Aggregate stats ─────────────────────────────────────────
+  const aggStats = useMemo(() => {
+    const withScore = roundStats.filter(r => r.totalScore > 0 && r.parTotal > 0);
+
+    // Handicap: best 8 differentials of last 20
+    const last20 = withScore.slice(0, 20);
+    const diffs = last20
+      .map(r => r.differential)
+      .filter((d): d is number => d !== null)
+      .sort((a, b) => a - b)
+      .slice(0, 8);
+    const handicap = diffs.length > 0
+      ? Math.round((diffs.reduce((a, b) => a + b, 0) / diffs.length) * 10) / 10
+      : null;
+
+    const withStats = roundStats.filter(r => r.hasStats);
+    const fairways = withStats.filter(r => r.fairwaysPct !== null).map(r => r.fairwaysPct!);
+    const girs = withStats.filter(r => r.girPct !== null).map(r => r.girPct!);
+    const putts = withStats.filter(r => r.avgPutts !== null).map(r => r.avgPutts!);
+    const penalties = withStats.map(r => r.penalties);
+
+    const avg = (arr: number[]) =>
+      arr.length > 0 ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : null;
+
+    return {
+      handicap,
+      fairwaysPct: avg(fairways),
+      girPct: avg(girs),
+      avgPutts: avg(putts),
+      avgPenalties: avg(penalties),
+      totalRounds: withScore.length,
+    };
+  }, [roundStats]);
+
+  // ─── Chart data ───────────────────────────────────────────────
+  const chartData = useMemo(() => {
+    return [...roundStats]
+      .filter(r => r.totalScore > 0 && r.parTotal > 0)
+      .reverse()
+      .slice(-15)
+      .map(r => ({
+        date: formatDate(r.round.date),
+        score: r.totalScore,
+        par: r.parTotal,
+        diff: r.differential ?? 0,
+      }));
+  }, [roundStats]);
+
+  const playedCourses = useMemo(() => {
+    const ids = new Set(completedRounds.map(r => r.courseId));
+    return (data?.courses ?? []).filter(c => ids.has(c.id));
+  }, [completedRounds, data]);
+
+  const inProgressRounds = (data?.rounds ?? []).filter(r => r.status === 'in_progress');
+
+  return (
+    <div className="p-4 md:p-8">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-display text-golf-gold">Dashboard</h1>
+          <p className="text-golf-muted mt-1 text-sm">Bienvenido, {username}</p>
         </div>
-
-        {loading ? (
-          <div className="flex justify-center py-20">
-            <LoadingSpinner size="lg" message="Cargando datos..." />
-          </div>
-        ) : error ? (
-          <div className="py-10">
-            <div className="rounded-xl p-6 text-center" style={{ background: '#2a1a1a', border: '1px solid #5a2020' }}>
-              <p className="text-red-400 text-sm mb-3">{error}</p>
-              <button onClick={loadData} className="px-4 py-2 rounded-lg text-sm font-medium text-white" style={{ background: '#1a6b3c' }}>
-                Reintentar
-              </button>
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Stats cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-              {[
-                { label: 'Total de Rondas', value: rounds.length, icon: '🏌️' },
-                { label: 'Rondas Completadas', value: completedRounds.length, icon: '✅' },
-                { label: 'En Progreso', value: inProgressRounds.length, icon: '⏳' },
-                { label: 'Jugadores', value: players.length, icon: '👥' },
-              ].map(stat => (
-                <div
-                  key={stat.label}
-                  className="rounded-xl p-5"
-                  style={{ background: '#1a2e20', border: '1px solid #2a4530' }}
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-2xl">{stat.icon}</span>
-                    <span className="text-3xl font-display text-golf-gold">{stat.value}</span>
-                  </div>
-                  <p className="text-golf-muted text-sm">{stat.label}</p>
-                </div>
-              ))}
-            </div>
-
-            {/* Quick actions */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-              <Link
-                href="/rounds/new"
-                className="flex items-center gap-4 rounded-xl p-5 transition-all duration-200 hover:opacity-90"
-                style={{ background: '#1a6b3c', border: '1px solid #2d9e5f' }}
-              >
-                <span className="text-3xl">⛳</span>
-                <div>
-                  <p className="font-semibold text-golf-text">Nueva Ronda</p>
-                  <p className="text-sm text-golf-gold">Comenzar a jugar</p>
-                </div>
-              </Link>
-              <Link
-                href="/admin"
-                className="flex items-center gap-4 rounded-xl p-5 transition-all duration-200 hover:opacity-90"
-                style={{ background: '#1a2e20', border: '1px solid #2a4530' }}
-              >
-                <span className="text-3xl">⚙️</span>
-                <div>
-                  <p className="font-semibold text-golf-text">Administración</p>
-                  <p className="text-sm text-golf-muted">Jugadores, palos y canchas</p>
-                </div>
-              </Link>
-            </div>
-
-            {/* Rondas en progreso */}
-            {inProgressRounds.length > 0 && (
-              <div className="mb-6">
-                <h2 className="text-xl font-display text-golf-text mb-3">Rondas en Progreso</h2>
-                <div className="space-y-2">
-                  {inProgressRounds.map(round => (
-                    <Link
-                      key={round.id}
-                      href={`/rounds/${round.id}`}
-                      className="flex items-center justify-between rounded-xl px-5 py-4 transition-all hover:opacity-90"
-                      style={{ background: '#223829', border: '1px solid #2a4530' }}
-                    >
-                      <div>
-                        <p className="text-golf-text font-medium">{getCourse(round.courseId)?.name || 'Sin cancha'}</p>
-                        <p className="text-golf-muted text-sm">{formatDate(round.date)} &bull; {round.holesPlayed} hoyos</p>
-                      </div>
-                      <span className="text-golf-gold text-sm font-medium">Continuar →</span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {recentRounds.length > 0 && (
-              <div>
-                <h2 className="text-xl font-display text-golf-text mb-3">Rondas Recientes</h2>
-                <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #2a4530' }}>
-                  <table className="w-full">
-                    <thead>
-                      <tr style={{ background: '#223829' }}>
-                        <th className="text-left px-5 py-3 text-golf-muted text-sm font-medium">Fecha</th>
-                        <th className="text-left px-5 py-3 text-golf-muted text-sm font-medium">Cancha</th>
-                        <th className="text-left px-5 py-3 text-golf-muted text-sm font-medium">Hoyos</th>
-                        <th className="text-left px-5 py-3 text-golf-muted text-sm font-medium">Estado</th>
-                        <th className="px-5 py-3"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {recentRounds.map((round, idx) => (
-                        <tr
-                          key={round.id}
-                          style={{
-                            background: idx % 2 === 0 ? '#1a2e20' : '#1e3424',
-                            borderTop: '1px solid #2a4530',
-                          }}
-                        >
-                          <td className="px-5 py-3 text-golf-text text-sm">{formatDate(round.date)}</td>
-                          <td className="px-5 py-3 text-golf-text text-sm">{getCourse(round.courseId)?.name || '-'}</td>
-                          <td className="px-5 py-3 text-golf-muted text-sm">{round.holesPlayed}</td>
-                          <td className="px-5 py-3">
-                            <span
-                              className="text-xs px-2 py-1 rounded-full font-medium"
-                              style={
-                                round.status === 'completed'
-                                  ? { background: '#0f4a28', color: '#2d9e5f' }
-                                  : { background: '#4a3a0f', color: '#c9a84c' }
-                              }
-                            >
-                              {round.status === 'completed' ? 'Completada' : 'En progreso'}
-                            </span>
-                          </td>
-                          <td className="px-5 py-3 text-right">
-                            <Link href={`/rounds/${round.id}`} className="text-golf-gold text-sm hover:underline">
-                              Ver →
-                            </Link>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {rounds.length === 0 && (
-              <div className="text-center py-16 text-golf-muted">
-                <p className="text-5xl mb-4">⛳</p>
-                <p className="text-lg font-display text-golf-text">Sin rondas registradas</p>
-                <p className="text-sm mt-2">Comenzá creando una nueva ronda</p>
-                <Link
-                  href="/rounds/new"
-                  className="inline-block mt-4 px-6 py-2 rounded-lg text-white font-medium"
-                  style={{ background: '#1a6b3c' }}
-                >
-                  Nueva Ronda
-                </Link>
-              </div>
-            )}
-          </>
+        {/* Course filter */}
+        {playedCourses.length > 1 && (
+          <select
+            value={courseFilter}
+            onChange={e => setCourseFilter(e.target.value)}
+            className="px-4 py-2 rounded-lg text-golf-text focus:outline-none text-sm"
+            style={{ background: '#1a2e20', border: '1px solid #2a4530', fontSize: '15px' }}
+          >
+            <option value="all">Todas las canchas</option>
+            {playedCourses.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
         )}
       </div>
-    </AppShell>
+
+      {loading ? (
+        <div className="flex justify-center py-20"><LoadingSpinner size="lg" message="Cargando..." /></div>
+      ) : error ? (
+        <div className="rounded-xl p-6 text-center" style={{ background: '#2a1a1a', border: '1px solid #5a2020' }}>
+          <p className="text-red-400 text-sm">{error}</p>
+        </div>
+      ) : (
+        <>
+          {/* Rondas en progreso */}
+          {inProgressRounds.length > 0 && (
+            <div className="mb-6">
+              <h2 className="text-base font-display text-golf-gold mb-3">En Progreso</h2>
+              <div className="space-y-2">
+                {inProgressRounds.map(r => (
+                  <Link
+                    key={r.id}
+                    href={`/rounds/${r.id}`}
+                    className="flex items-center justify-between rounded-xl px-5 py-4"
+                    style={{ background: '#223829', border: '1px solid #2a4530' }}
+                  >
+                    <div>
+                      <p className="text-golf-text font-medium">{getCourse(r.courseId)?.name || '—'}</p>
+                      <p className="text-golf-muted text-xs">{formatDate(r.date)} · {r.holesPlayed} hoyos</p>
+                    </div>
+                    <span className="text-golf-gold text-sm">Continuar →</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Stat cards */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
+            <StatCard label="Rondas jugadas" value={String(aggStats.totalRounds)} icon="🏌️" />
+            <StatCard
+              label="Hándicap aprox."
+              value={aggStats.handicap !== null ? (aggStats.handicap > 0 ? `+${aggStats.handicap}` : String(aggStats.handicap)) : '—'}
+              icon="🎯"
+              hint="Promedio 8 mejores diferencias (últimas 20)"
+            />
+            <StatCard
+              label="Fairways Hit"
+              value={aggStats.fairwaysPct !== null ? `${aggStats.fairwaysPct}%` : '—'}
+              icon="🌿"
+            />
+            <StatCard
+              label="GIR"
+              value={aggStats.girPct !== null ? `${aggStats.girPct}%` : '—'}
+              icon="🏳️"
+            />
+            <StatCard
+              label="Putts / hoyo"
+              value={aggStats.avgPutts !== null ? String(aggStats.avgPutts) : '—'}
+              icon="⛳"
+            />
+            <StatCard
+              label="Penalidades / ronda"
+              value={aggStats.avgPenalties !== null ? String(aggStats.avgPenalties) : '—'}
+              icon="⚠️"
+            />
+          </div>
+
+          {/* Score chart */}
+          {chartData.length >= 2 && (
+            <div className="rounded-xl p-5 mb-8" style={{ background: '#1a2e20', border: '1px solid #2a4530' }}>
+              <h2 className="text-base font-display text-golf-text mb-4">Evolución de Score</h2>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2a4530" />
+                  <XAxis dataKey="date" tick={{ fill: '#8aad8f', fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: '#8aad8f', fontSize: 11 }} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    contentStyle={{ background: '#1a2e20', border: '1px solid #2a4530', borderRadius: '8px', color: '#e8f0e9' }}
+                    formatter={(value, name) => [
+                      name === 'score' ? `${value} golpes` : `Par ${value}`,
+                      name === 'score' ? 'Score' : 'Par',
+                    ]}
+                  />
+                  <Line type="monotone" dataKey="par" stroke="#2a4530" strokeDasharray="4 2" dot={false} strokeWidth={1.5} />
+                  <Line type="monotone" dataKey="score" stroke="#c9a84c" dot={{ r: 3, fill: '#c9a84c' }} strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Recent rounds table */}
+          {roundStats.length > 0 ? (
+            <div>
+              <h2 className="text-base font-display text-golf-text mb-3">Últimas Rondas</h2>
+              <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #2a4530', overflowX: 'auto' }}>
+                <table className="w-full text-sm" style={{ minWidth: '360px' }}>
+                  <thead>
+                    <tr style={{ background: '#223829' }}>
+                      <th className="text-left px-4 py-3 text-golf-muted font-medium">Fecha</th>
+                      <th className="text-left px-4 py-3 text-golf-muted font-medium">Cancha</th>
+                      <th className="text-right px-4 py-3 text-golf-muted font-medium">Score</th>
+                      <th className="text-right px-4 py-3 text-golf-muted font-medium">vs Par</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roundStats.slice(0, 10).map(({ round, totalScore, differential }, idx) => (
+                      <tr
+                        key={round.id}
+                        style={{ background: idx % 2 === 0 ? '#1a2e20' : '#1e3424', borderTop: '1px solid #2a4530' }}
+                      >
+                        <td className="px-4 py-3 text-golf-text">{formatDate(round.date)}</td>
+                        <td className="px-4 py-3 text-golf-muted">{getCourse(round.courseId)?.name || '—'}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-golf-text">{totalScore || '—'}</td>
+                        <td className="px-4 py-3 text-right font-semibold">
+                          {differential !== null ? (
+                            <span style={{ color: differential < 0 ? '#93c5fd' : differential === 0 ? '#8aad8f' : '#fca5a5' }}>
+                              {differential > 0 ? `+${differential}` : differential}
+                            </span>
+                          ) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-16 text-golf-muted">
+              <p className="text-5xl mb-4">⛳</p>
+              <p className="text-lg font-display text-golf-text">Sin rondas registradas</p>
+              <p className="text-sm mt-2">Comenzá creando una nueva ronda</p>
+              <Link href="/rounds/new" className="inline-block mt-4 px-6 py-2 rounded-lg text-white font-medium" style={{ background: '#1a6b3c' }}>
+                Nueva Ronda
+              </Link>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, icon, hint }: { label: string; value: string; icon: string; hint?: string }) {
+  return (
+    <div className="rounded-xl p-4" style={{ background: '#1a2e20', border: '1px solid #2a4530' }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xl">{icon}</span>
+        <span className="text-2xl font-display text-golf-gold">{value}</span>
+      </div>
+      <p className="text-golf-muted text-xs">{label}</p>
+      {hint && <p className="text-golf-muted text-xs mt-0.5 opacity-60">{hint}</p>}
+    </div>
   );
 }
