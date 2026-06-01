@@ -4,7 +4,7 @@ import AppShell from '@/components/AppShell';
 import { useEffect, useState, useMemo } from 'react';
 import { getUserRoundData, UserRoundData } from '@/lib/storage';
 import { useUser } from '@/lib/user-context';
-import { Course, CourseHole } from '@/lib/types';
+import { Club, Course, CourseHole, Shot } from '@/lib/types';
 import { formatDate, resolveHoleNumber } from '@/lib/utils';
 import Link from 'next/link';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -21,17 +21,89 @@ export default function DashboardPage() {
   );
 }
 
+// ─── Derive per-hole stats from shots when hole_stats is absent ───────────────
+function deriveStatsFromShots(
+  shotsForRound: Shot[],
+  holes: CourseHole[],
+  holesPlayed: number,
+  courseHoleCount: number,
+  clubs: Club[],
+) {
+  const putterId = clubs.find(c => c.name === 'Putter')?.id ?? null;
+
+  // Exclude penalty shots (same as round detail: filter !isPenalty for fairway/GIR/drive)
+  const nonPenaltyByHole = new Map<number, Shot[]>();
+  shotsForRound.filter(s => !s.isPenalty).forEach(s => {
+    const arr = nonPenaltyByHole.get(s.holeNumber) ?? [];
+    arr.push(s);
+    nonPenaltyByHole.set(s.holeNumber, arr);
+  });
+
+  let fairwaysHit = 0;
+  let fairwayOpportunities = 0;
+  let girCount = 0;
+  const totalHoles = holesPlayed;
+
+  // Putts: shots with Putter club, excluding penalty shots (same as PlayerShotsStats)
+  const puttShots = shotsForRound.filter(s =>
+    !s.isPenalty && putterId !== null && s.clubId === putterId
+  );
+  const totalPutts = puttShots.length;
+
+  // Penalties: shots where result is Agua or Fuera de límites (no isPenalty flag — avoids double count)
+  const penalties = shotsForRound.filter(s =>
+    s.result === 'Agua' || s.result === 'Fuera de límites'
+  ).length;
+
+  for (let h = 1; h <= totalHoles; h++) {
+    const holeNum = resolveHoleNumber(h, courseHoleCount);
+    const ch = holes.find(x => x.holeNumber === holeNum);
+    const hShots = (nonPenaltyByHole.get(h) ?? []).sort((a, b) => a.shotNumber - b.shotNumber);
+
+    if (!ch) continue;
+
+    // Fairways: first non-penalty shot on par 4/5 with result Fairway
+    if (ch.par === 4 || ch.par === 5) {
+      fairwayOpportunities++;
+      if (hShots[0]?.result === 'Fairway') fairwaysHit++;
+    }
+
+    // GIR: reached green within (par - 2) non-penalty shots
+    girCount++;  // will subtract if not GIR
+    const regulation = ch.par - 2;
+    let gir = false;
+    for (let i = 1; i <= regulation; i++) {
+      const shot = hShots.find(s => s.shotNumber === i);
+      if (shot && (shot.result === 'Green' || shot.result === 'Hoyo')) { gir = true; break; }
+    }
+    if (!gir) girCount--;
+  }
+
+  return {
+    fairwaysPct: fairwayOpportunities > 0 ? (fairwaysHit / fairwayOpportunities) * 100 : null,
+    girPct: totalHoles > 0 ? (girCount / totalHoles) * 100 : null,
+    avgPutts: totalHoles > 0 ? totalPutts / totalHoles : null,
+    penalties,
+    hasStats: shotsForRound.length > 0,
+  };
+}
+
 function DashboardContent() {
   const { username } = useUser();
   const [data, setData] = useState<UserRoundData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [courseFilter, setCourseFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   useEffect(() => {
     getUserRoundData(username)
       .then(setData)
-      .catch(() => setError('Error al cargar estadísticas'))
+      .catch(err => {
+        console.error('[Dashboard] Error loading data:', err);
+        setError('Error al cargar estadísticas');
+      })
       .finally(() => setLoading(false));
   }, [username]);
 
@@ -41,9 +113,14 @@ function DashboardContent() {
   );
 
   const filteredRounds = useMemo(() => {
-    if (courseFilter === 'all') return completedRounds;
-    return completedRounds.filter(r => r.courseId === courseFilter);
-  }, [completedRounds, courseFilter]);
+    return completedRounds.filter(r => {
+      if (courseFilter !== 'all' && r.courseId !== courseFilter) return false;
+      const roundDate = new Date(r.date).toLocaleDateString('en-CA'); // YYYY-MM-DD en timezone local
+      if (dateFrom && roundDate < dateFrom) return false;
+      if (dateTo && roundDate > dateTo) return false;
+      return true;
+    });
+  }, [completedRounds, courseFilter, dateFrom, dateTo]);
 
   const getCourse = (id: string): Course | undefined =>
     data?.courses.find(c => c.id === id);
@@ -51,7 +128,7 @@ function DashboardContent() {
   const getHoles = (courseId: string): CourseHole[] =>
     (data?.courseHoles ?? []).filter(h => h.courseId === courseId);
 
-  // ─── Per-round stats ──────────────────────────────────────────
+  // ─── Per-round stats ─────────────────────────────────────────
   const roundStats = useMemo(() => {
     return filteredRounds.map(round => {
       const scores = (data?.holeScores ?? []).filter(
@@ -60,8 +137,13 @@ function DashboardContent() {
       const stats = (data?.holeStats ?? []).filter(
         s => s.roundId === round.id && s.username === username
       );
+      const shotsForRound = (data?.shots ?? []).filter(
+        s => s.roundId === round.id && s.username === username
+      );
       const holes = getHoles(round.courseId);
       const courseHoleCount = holes.length;
+
+
 
       const totalScore = scores.reduce((acc, s) => acc + s.strokes, 0);
 
@@ -78,21 +160,60 @@ function DashboardContent() {
         return ch && (ch.par === 4 || ch.par === 5);
       });
 
-      const fairwaysHit = stats.filter(s => s.fairwayHit === true).length;
-      const girCount = stats.filter(s => s.gir).length;
-      const totalPutts = stats.reduce((acc, s) => acc + (s.putts || 0), 0);
-      const penaltyCount = stats.filter(s => s.penalty).length;
+      // ── Stats: prefer hole_stats, fall back to deriving from shots ──
+      if (stats.length > 0) {
+        // Stats-level tracking: use hole_stats
+        // Penalties: count holes with penalty = true (one per penalized hole)
+        // but also count from shots if available (more accurate)
+        const penaltyFromShots = shotsForRound.filter(
+          s => s.result === 'Agua' || s.result === 'Fuera de límites'
+        ).length;
+        const penaltyCount = shotsForRound.length > 0
+          ? penaltyFromShots
+          : stats.filter(s => s.penalty).length;
 
+        const fairwaysHit = stats.filter(s => s.fairwayHit === true).length;
+        const girCount = stats.filter(s => s.gir).length;
+        const totalPutts = stats.reduce((acc, s) => acc + (s.putts || 0), 0);
+
+        return {
+          round,
+          totalScore,
+          parTotal,
+          differential: parTotal > 0 ? totalScore - parTotal : null,
+          fairwaysPct: par45Holes.length > 0 ? (fairwaysHit / par45Holes.length) * 100 : null,
+          girPct: stats.length > 0 ? (girCount / stats.length) * 100 : null,
+          avgPutts: stats.length > 0 ? totalPutts / stats.length : null,
+          penalties: penaltyCount,
+          hasStats: true,
+        };
+      }
+
+      if (shotsForRound.length > 0) {
+        // Shots-level tracking: derive stats from shots table
+        const derived = deriveStatsFromShots(
+          shotsForRound, holes, round.holesPlayed, courseHoleCount, data?.clubs ?? []
+        );
+        return {
+          round,
+          totalScore,
+          parTotal,
+          differential: parTotal > 0 ? totalScore - parTotal : null,
+          ...derived,
+        };
+      }
+
+      // Score-only tracking
       return {
         round,
         totalScore,
         parTotal,
         differential: parTotal > 0 ? totalScore - parTotal : null,
-        fairwaysPct: par45Holes.length > 0 ? (fairwaysHit / par45Holes.length) * 100 : null,
-        girPct: stats.length > 0 ? (girCount / stats.length) * 100 : null,
-        avgPutts: stats.length > 0 ? totalPutts / stats.length : null,
-        penalties: penaltyCount,
-        hasStats: stats.length > 0,
+        fairwaysPct: null,
+        girPct: null,
+        avgPutts: null,
+        penalties: 0,
+        hasStats: false,
       };
     });
   }, [filteredRounds, data, username]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -152,26 +273,71 @@ function DashboardContent() {
 
   const inProgressRounds = (data?.rounds ?? []).filter(r => r.status === 'in_progress');
 
+  const hasActiveFilters = courseFilter !== 'all' || dateFrom !== '' || dateTo !== '';
+
   return (
     <div className="p-4 md:p-8">
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-display text-golf-gold">Dashboard</h1>
-          <p className="text-golf-muted mt-1 text-sm">Bienvenido, {username}</p>
+      <div className="mb-6">
+        <h1 className="text-2xl md:text-3xl font-display text-golf-gold">Dashboard</h1>
+        <p className="text-golf-muted mt-1 text-sm">Bienvenido, {username}</p>
+      </div>
+
+      {/* ── Filters ── */}
+      <div
+        className="rounded-xl p-4 mb-6"
+        style={{ background: '#1a2e20', border: '1px solid #2a4530' }}
+      >
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Course */}
+          <div className="flex flex-col gap-1">
+            <label className="text-golf-muted text-xs font-medium">Cancha</label>
+            <select
+              value={courseFilter}
+              onChange={e => setCourseFilter(e.target.value)}
+              className="w-full px-3 rounded-lg text-golf-text focus:outline-none"
+              style={{ background: '#223829', border: '1px solid #2a4530', fontSize: '16px', height: '44px' }}
+            >
+              <option value="all">Todas las canchas</option>
+              {playedCourses.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Date from */}
+          <div className="flex flex-col gap-1">
+            <label className="text-golf-muted text-xs font-medium">Desde</label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              className="w-full px-3 rounded-lg text-golf-text focus:outline-none"
+              style={{ background: '#223829', border: '1px solid #2a4530', fontSize: '16px', height: '44px', colorScheme: 'dark' }}
+            />
+          </div>
+
+          {/* Date to */}
+          <div className="flex flex-col gap-1">
+            <label className="text-golf-muted text-xs font-medium">Hasta</label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
+              className="w-full px-3 rounded-lg text-golf-text focus:outline-none"
+              style={{ background: '#223829', border: '1px solid #2a4530', fontSize: '16px', height: '44px', colorScheme: 'dark' }}
+            />
+          </div>
         </div>
-        {/* Course filter */}
-        {playedCourses.length > 1 && (
-          <select
-            value={courseFilter}
-            onChange={e => setCourseFilter(e.target.value)}
-            className="px-4 py-2 rounded-lg text-golf-text focus:outline-none text-sm"
-            style={{ background: '#1a2e20', border: '1px solid #2a4530', fontSize: '15px' }}
+
+        {/* Clear */}
+        {hasActiveFilters && (
+          <button
+            onClick={() => { setCourseFilter('all'); setDateFrom(''); setDateTo(''); }}
+            className="mt-3 w-full py-2 rounded-lg text-golf-muted text-sm hover:text-golf-text transition-colors"
+            style={{ background: '#223829', border: '1px solid #2a4530', minHeight: '44px' }}
           >
-            <option value="all">Todas las canchas</option>
-            {playedCourses.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+            Limpiar filtros
+          </button>
         )}
       </div>
 
@@ -263,7 +429,14 @@ function DashboardContent() {
           {/* Recent rounds table */}
           {roundStats.length > 0 ? (
             <div>
-              <h2 className="text-base font-display text-golf-text mb-3">Últimas Rondas</h2>
+              <h2 className="text-base font-display text-golf-text mb-3">
+                Últimas Rondas
+                {hasActiveFilters && (
+                  <span className="text-golf-muted text-xs font-normal ml-2">
+                    ({filteredRounds.length} de {completedRounds.length})
+                  </span>
+                )}
+              </h2>
               <div className="rounded-xl overflow-hidden" style={{ border: '1px solid #2a4530', overflowX: 'auto' }}>
                 <table className="w-full text-sm" style={{ minWidth: '360px' }}>
                   <thead>
@@ -299,11 +472,17 @@ function DashboardContent() {
           ) : (
             <div className="text-center py-16 text-golf-muted">
               <p className="text-5xl mb-4">⛳</p>
-              <p className="text-lg font-display text-golf-text">Sin rondas registradas</p>
-              <p className="text-sm mt-2">Comenzá creando una nueva ronda</p>
-              <Link href="/rounds/new" className="inline-block mt-4 px-6 py-2 rounded-lg text-white font-medium" style={{ background: '#1a6b3c' }}>
-                Nueva Ronda
-              </Link>
+              <p className="text-lg font-display text-golf-text">
+                {hasActiveFilters ? 'Sin rondas para los filtros seleccionados' : 'Sin rondas registradas'}
+              </p>
+              {!hasActiveFilters && (
+                <>
+                  <p className="text-sm mt-2">Comenzá creando una nueva ronda</p>
+                  <Link href="/rounds/new" className="inline-block mt-4 px-6 py-2 rounded-lg text-white font-medium" style={{ background: '#1a6b3c' }}>
+                    Nueva Ronda
+                  </Link>
+                </>
+              )}
             </div>
           )}
         </>

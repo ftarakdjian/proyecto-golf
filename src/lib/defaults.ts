@@ -1,10 +1,4 @@
-import { Player, Club, ShotResult } from './types';
-
-export const DEFAULT_PLAYERS: Player[] = [
-  { id: 'p1', name: 'Marcelo', createdAt: new Date().toISOString() },
-  { id: 'p2', name: 'Nacho', createdAt: new Date().toISOString() },
-  { id: 'p3', name: 'Facu', createdAt: new Date().toISOString() },
-];
+import { Club, ShotResult } from './types';
 
 export const DEFAULT_CLUBS: Club[] = [
   { id: 'c1', name: 'Driver' },

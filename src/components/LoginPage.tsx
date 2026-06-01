@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState(USER_NAMES[0]);
+  const [username, setUsername] = useState('Chechu');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 

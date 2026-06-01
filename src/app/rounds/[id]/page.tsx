@@ -353,7 +353,7 @@ function PlayerShotsStats({ playerName, shots, courseHoles, round, clubs }: {
   const puttsByH = new Map<number, number>();
   puttShots.forEach(s => puttsByH.set(s.holeNumber, (puttsByH.get(s.holeNumber) || 0) + 1));
   const pv = Array.from(puttsByH.values());
-  const totalPenalties = shots.filter(s => s.isPenalty || s.result === 'Agua' || s.result === 'Fuera de límites').length;
+  const totalPenalties = shots.filter(s => s.result === 'Agua' || s.result === 'Fuera de límites').length;
 
   return (
     <div className="rounded-xl p-5" style={{ background: '#1a2e20', border: '1px solid #2a4530' }}>
